@@ -1,0 +1,9 @@
+# zizmor's blanket policy is hash-pinning. Everything in this repository is hash-pinned except the
+# self-references in the reusable workflow and the examples, which point at this action's own
+# floating major tag (v1) and cannot be hash-pinned before the tag exists.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        metalbear-co/*: ref-pin
+        "*": hash-pin

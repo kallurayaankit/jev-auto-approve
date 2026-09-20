@@ -1,0 +1,32 @@
+# Approve automatically on every push to a pull request, scoped to a trusted set of authors.
+#
+# `pull_request` does not expose secrets to runs from forks, so this only ever fires on branches in
+# the repository itself. Keep it that way: giving fork PRs a path to an approval token is how an
+# auto-approver turns into a supply-chain hole.
+name: Jev auto-approve
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  auto-approve:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft &&
+      contains(fromJSON('["dependabot[bot]", "renovate[bot]"]'), github.event.pull_request.user.login)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: metalbear-co/jev-auto-approve@v1
+        with:
+          jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
+          approve-token: ${{ secrets.CUBBY_MB_TOKEN }}
+          approver: cubby-mb
+          confidence-threshold: '0.95'
+          prompt: >-
+            This is an automated dependency update. Approve only patch or minor version bumps with
+            no source changes beyond the manifest and lockfile.

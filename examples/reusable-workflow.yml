@@ -1,0 +1,25 @@
+# Same thing through the reusable workflow, so callers do not restate permissions or step wiring.
+name: Jev auto-approve on comment
+
+on:
+  issue_comment:
+    types: [created]
+
+# A reusable workflow can only narrow what the caller grants, so the approval scope is granted here.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  auto-approve:
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/jev-approve') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    uses: metalbear-co/jev-auto-approve/.github/workflows/jev-auto-approve.yml@v1
+    with:
+      confidence-threshold: '0.92'
+      approver: cubby-mb
+    secrets:
+      jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
+      approve-token: ${{ secrets.CUBBY_MB_TOKEN }}

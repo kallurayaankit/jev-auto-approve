@@ -1,0 +1,52 @@
+# Approve on demand: someone with write access comments `/jev-approve` on a pull request.
+#
+# issue_comment always runs from the default branch with repository secrets available, which is why
+# this is the safest trigger for an approval bot — fork PRs cannot swap the workflow out from under
+# you the way pull_request_target lets them swap the checked-out code.
+name: Jev auto-approve on comment
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  auto-approve:
+    # Only on pull requests, only for the command, only from someone who can already merge.
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/jev-approve') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Acknowledge the command
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes',
+            });
+
+      - id: jev
+        uses: metalbear-co/jev-auto-approve@v1
+        with:
+          jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
+          approve-token: ${{ secrets.CUBBY_MB_TOKEN }}
+          approver: cubby-mb
+          confidence-threshold: '0.92'
+          prompt: >-
+            This repository ships to production on merge to main. Approve only changes that are
+            self-contained, covered by tests where behaviour changed, and free of migrations or
+            credential handling.
+
+      - name: Report
+        env:
+          APPROVED: ${{ steps.jev.outputs.approved }}
+          CONFIDENCE: ${{ steps.jev.outputs.confidence }}
+        run: echo "approved=$APPROVED confidence=$CONFIDENCE"

@@ -1,0 +1,14 @@
+{
+  "name": "jev-auto-approve",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GitHub Action that approves a pull request when the Jev API returns an approve verdict above a confidence threshold.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

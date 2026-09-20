@@ -1,0 +1,93 @@
+# Reusable workflow: call this from any repository instead of wiring the action up by hand.
+#
+#   jobs:
+#     auto-approve:
+#       uses: metalbear-co/jev-auto-approve/.github/workflows/jev-auto-approve.yml@v1
+#       with:
+#         confidence-threshold: '0.92'
+#         approver: cubby-mb
+#       secrets:
+#         jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
+#         approve-token: ${{ secrets.CUBBY_MB_TOKEN }}
+name: Jev auto-approve
+
+on:
+  workflow_call:
+    inputs:
+      confidence-threshold:
+        description: 'Minimum Jev confidence (0-1) required to approve.'
+        type: string
+        required: false
+        default: '0.9'
+      prompt:
+        description: 'Extra instructions describing what this repository considers approvable.'
+        type: string
+        required: false
+        default: ''
+      approver:
+        description: 'Login that approve-token must belong to, e.g. cubby-mb.'
+        type: string
+        required: false
+        default: ''
+      pr-number:
+        description: 'Pull request to review. Defaults to the PR carried by the triggering event.'
+        type: string
+        required: false
+        default: ''
+      model:
+        type: string
+        required: false
+        default: 'jev-latest'
+      dry-run:
+        type: boolean
+        required: false
+        default: false
+      comment-on-skip:
+        type: boolean
+        required: false
+        default: true
+      runs-on:
+        type: string
+        required: false
+        default: 'ubuntu-latest'
+    secrets:
+      jev-api-key:
+        description: 'TypeSafe API key for the Jev API.'
+        required: true
+      approve-token:
+        description: 'Token of the account that should appear as the reviewer.'
+        required: true
+    outputs:
+      approved:
+        description: '"true" when an approving review was submitted.'
+        value: ${{ jobs.jev-auto-approve.outputs.approved }}
+      verdict:
+        description: 'The choice Jev returned.'
+        value: ${{ jobs.jev-auto-approve.outputs.verdict }}
+      confidence:
+        description: 'Jev confidence for the verdict.'
+        value: ${{ jobs.jev-auto-approve.outputs.confidence }}
+
+jobs:
+  jev-auto-approve:
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      approved: ${{ steps.jev.outputs.approved }}
+      verdict: ${{ steps.jev.outputs.verdict }}
+      confidence: ${{ steps.jev.outputs.confidence }}
+    steps:
+      - id: jev
+        uses: metalbear-co/jev-auto-approve@v1
+        with:
+          jev-api-key: ${{ secrets.jev-api-key }}
+          approve-token: ${{ secrets.approve-token }}
+          confidence-threshold: ${{ inputs.confidence-threshold }}
+          prompt: ${{ inputs.prompt }}
+          approver: ${{ inputs.approver }}
+          pr-number: ${{ inputs.pr-number }}
+          model: ${{ inputs.model }}
+          dry-run: ${{ inputs.dry-run }}
+          comment-on-skip: ${{ inputs.comment-on-skip }}

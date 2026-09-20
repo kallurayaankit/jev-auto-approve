@@ -71,19 +71,14 @@ test('empty inputs fall back to the built-in question and rubric', () => {
   const question = buildQuestions({ instructions: '  ', criteria: '' })[QUESTION_KEY];
   assert.equal(question.instructions, DEFAULT_INSTRUCTIONS);
   assert.deepEqual(question.criteria, DEFAULT_CRITERIA);
-  // The question is only the question; each criteria side says what that answer means.
+  // The question is only the question, and each criteria side says what that answer means -
+  // nothing about what makes a given pull request one or the other.
   assert.equal(question.instructions, DEFAULT_INSTRUCTIONS);
+  assert.deepEqual(question.criteria, DEFAULT_CRITERIA);
   assert.ok(question.criteria.false.startsWith('No:'));
   assert.ok(question.criteria.true.startsWith('Yes:'));
-  assert.match(question.criteria.false, /tests that were added or updated, or by manual testing/);
-  // A review already addressed belongs to the no side.
-  assert.match(question.criteria.false, /what they raised was addressed/);
-  // Reaching past the codebase shapes the answer rather than settling it on its own.
-  assert.match(question.criteria.false, /reaches past this codebase/);
-  assert.match(question.criteria.true, /consequences for them are not accounted for/);
-  // Privileged automation is the one thing the default refuses outright.
-  assert.match(question.criteria.false, /touches privileged automation/);
-  assert.match(question.criteria.true, /write-capable credentials/);
+  assert.match(question.criteria.false, /approved as it stands/);
+  assert.match(question.criteria.true, /read by a human/);
 });
 
 test('criteria can be given as JSON to phrase both sides', () => {

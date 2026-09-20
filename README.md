@@ -109,30 +109,28 @@ Two inputs shape the decision.
 
 > Does this pull request require a human reviewer before it can be merged?
 
-**`criteria`** says what each answer *means*. Not what to do, and not what to weigh — the two sides
-describe the pull request that each answer denotes, and the model decides which one it is looking at.
+**`criteria`** says what each answer *means*. The default says only that, and deliberately no more:
 
-**No** means the change is verified and how far it reaches is understood: behaviour that changed is
-covered by tests or by recorded manual testing; anything an earlier human reviewer raised was
-addressed, in the code or in an answer that holds up; where the change reaches past the codebase
-(endpoints, exported signatures, stored schemas, CLI flags, config keys) it is small and deliberate,
-with the affected callers accounted for; and it touches no privileged automation.
+```
+No:  this pull request needs no human intervention. It can be approved as it stands.
+Yes: this pull request should be read by a human before it is merged.
+```
 
-**Yes** means something is unsettled, or the change reaches somewhere no machine should sign off:
-behaviour changed with no tests and no recorded manual test; or review feedback is unaddressed or
-answered unconvincingly; or the change alters something others depend on without accounting for the
-consequences; or it touches CI, release, publishing, signing or credential configuration, or
-anything else running with write-capable credentials; or the pull request does not show enough to
-tell.
+Nothing there decides which one a given pull request is — with the default in place, that judgement
+is Jev's, made against the state it is given. What makes a pull request one or the other in *your*
+repository is what `criteria` is for: replace the no side with free text, or pass a JSON object with
+`true` and `false` string keys to write both. [mirrord's workflow](#in-the-wild) does the latter.
 
-Reaching past the codebase therefore shapes the answer without settling it on its own — a small,
-explained, tested interface change can still be a *no*. Privileged automation is the one absolute:
-an auto-approver that can approve changes to its own pipeline is not a gate.
+Two things worth putting in your own criteria, since the default cannot know them:
 
-Missing context lands on *yes* by definition — "the pull request does not show enough to tell" is
-part of what yes means — so a thin diff pushes toward a human rather than toward an approval. Set
-`criteria` to free text to replace the no side, or pass a JSON object with `true` and `false` string
-keys to phrase both yourself.
+- **What "verified" looks like here** — which changes need tests, what counts as a recorded manual
+  test, whether a changelog fragment is expected.
+- **What is never approved by a machine.** Anything running with write-capable credentials — CI and
+  release configuration, publishing, signing, credentials — is worth naming on the `yes` side. An
+  auto-approver that can approve changes to its own pipeline is not a gate.
+
+Missing context lands on *yes* the moment you say so on that side; the state always states when the
+diff was truncated or the discussion could not be read, so there is something to catch it on.
 
 ## What Jev sees
 

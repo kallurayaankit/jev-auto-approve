@@ -5,24 +5,12 @@ export const QUESTION_KEY = 'needs_human_review';
 export const DEFAULT_INSTRUCTIONS =
   'Does this pull request require a human reviewer before it can be merged?';
 
-// Each side says what the answer means. Directives ("weigh this", "answer yes when") belong in
-// neither: the question is the question, and the criteria are the definitions it is answered against.
+// Both sides say what the answer means and nothing else. What makes a particular repository's
+// pull request one or the other belongs in its own `criteria`, not in a default shipped to
+// everyone.
 export const DEFAULT_CRITERIA = {
-  false: [
-    'No: the change is verified, and how far it reaches is understood.',
-    'Behaviour that changed is covered by tests that were added or updated, or by manual testing the pull request records.',
-    'Where a human has already reviewed it, what they raised was addressed - in the code, or in an answer that holds up.',
-    'Where the change reaches past this codebase - HTTP endpoints and their payloads, public function or method signatures, exported types, stored schemas, CLI flags, configuration keys - it is small and deliberate, and the pull request accounts for the callers it affects.',
-    'Nothing in it touches privileged automation.',
-  ].join('\n'),
-  true: [
-    'Yes: something about the change is unsettled, or it reaches somewhere no machine should sign off.',
-    'Behaviour changed with neither tests nor a record of manual testing.',
-    'Or something raised in review is unaddressed, or answered in a way that does not hold up.',
-    'Or the change alters something others depend on, and the consequences for them are not accounted for.',
-    'Or it touches privileged automation: CI, release, publishing, signing or credential configuration, or anything else that runs with write-capable credentials, whatever else the change does.',
-    'Or the pull request does not show enough to tell which of these is the case.',
-  ].join('\n'),
+  false: 'No: this pull request needs no human intervention. It can be approved as it stands.',
+  true: 'Yes: this pull request should be read by a human before it is merged.',
 };
 
 /**

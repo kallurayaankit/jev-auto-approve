@@ -31,10 +31,10 @@ inputs:
     default: ''
   criteria:
     description: >-
-      Free text describing when NO human reviewer is required; this is the rubric the approval
-      turns on. Defaults to: no externally visible API change, and the change is verified by tests
-      or a record of manual testing. Pass a JSON object with "true" and "false" string keys to
-      phrase both sides yourself.
+      What each answer means. The default says only that "no" is a pull request needing no human
+      intervention and "yes" is one that should be read by a human, leaving the judgement to Jev.
+      Free text replaces the "no" side; a JSON object with "true" and "false" string keys writes
+      both. This is where a repository says what it will and will not have approved by a machine.
     required: false
     default: ''
   approver:

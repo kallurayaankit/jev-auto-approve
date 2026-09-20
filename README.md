@@ -114,16 +114,20 @@ describe the pull request that each answer denotes, and the model decides which 
 
 **No** means the change is verified and how far it reaches is understood: behaviour that changed is
 covered by tests or by recorded manual testing; anything an earlier human reviewer raised was
-addressed, in the code or in an answer that holds up; and where the change reaches past the codebase
+addressed, in the code or in an answer that holds up; where the change reaches past the codebase
 (endpoints, exported signatures, stored schemas, CLI flags, config keys) it is small and deliberate,
-with the affected callers accounted for.
+with the affected callers accounted for; and it touches no privileged automation.
 
-**Yes** means something is unsettled: behaviour changed with no tests and no recorded manual test; or
-review feedback is unaddressed or answered unconvincingly; or the change alters something others
-depend on without accounting for the consequences; or the pull request does not show enough to tell.
+**Yes** means something is unsettled, or the change reaches somewhere no machine should sign off:
+behaviour changed with no tests and no recorded manual test; or review feedback is unaddressed or
+answered unconvincingly; or the change alters something others depend on without accounting for the
+consequences; or it touches CI, release, publishing, signing or credential configuration, or
+anything else running with write-capable credentials; or the pull request does not show enough to
+tell.
 
 Reaching past the codebase therefore shapes the answer without settling it on its own — a small,
-explained, tested interface change can still be a *no*.
+explained, tested interface change can still be a *no*. Privileged automation is the one absolute:
+an auto-approver that can approve changes to its own pipeline is not a gate.
 
 Missing context lands on *yes* by definition — "the pull request does not show enough to tell" is
 part of what yes means — so a thin diff pushes toward a human rather than toward an approval. Set

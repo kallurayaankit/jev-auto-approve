@@ -81,6 +81,9 @@ test('empty inputs fall back to the built-in question and rubric', () => {
   // Reaching past the codebase shapes the answer rather than settling it on its own.
   assert.match(question.criteria.false, /reaches past this codebase/);
   assert.match(question.criteria.true, /consequences for them are not accounted for/);
+  // Privileged automation is the one thing the default refuses outright.
+  assert.match(question.criteria.false, /touches privileged automation/);
+  assert.match(question.criteria.true, /write-capable credentials/);
 });
 
 test('criteria can be given as JSON to phrase both sides', () => {

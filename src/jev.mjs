@@ -13,12 +13,14 @@ export const DEFAULT_CRITERIA = {
     'Behaviour that changed is covered by tests that were added or updated, or by manual testing the pull request records.',
     'Where a human has already reviewed it, what they raised was addressed - in the code, or in an answer that holds up.',
     'Where the change reaches past this codebase - HTTP endpoints and their payloads, public function or method signatures, exported types, stored schemas, CLI flags, configuration keys - it is small and deliberate, and the pull request accounts for the callers it affects.',
+    'Nothing in it touches privileged automation.',
   ].join('\n'),
   true: [
-    'Yes: something about the change is unsettled.',
+    'Yes: something about the change is unsettled, or it reaches somewhere no machine should sign off.',
     'Behaviour changed with neither tests nor a record of manual testing.',
     'Or something raised in review is unaddressed, or answered in a way that does not hold up.',
     'Or the change alters something others depend on, and the consequences for them are not accounted for.',
+    'Or it touches privileged automation: CI, release, publishing, signing or credential configuration, or anything else that runs with write-capable credentials, whatever else the change does.',
     'Or the pull request does not show enough to tell which of these is the case.',
   ].join('\n'),
 };

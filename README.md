@@ -187,9 +187,29 @@ The action runs the files in `src/` directly on the runner's Node 20 — there i
 Actions used in CI and in the examples are hash-pinned; the only exceptions are the self-references
 to this action's own `v1` tag, allowed explicitly in [`zizmor.yml`](zizmor.yml).
 
-Publishing: tag a release and move the major tag.
+## Releasing
+
+Consumers pin `@v1`, so that tag has to follow every release. One dispatch does the lot — run
+[`release.yml`](.github/workflows/release.yml) from the Actions tab, or:
 
 ```bash
-git tag -a v1.0.0 -m 'v1.0.0' && git push origin v1.0.0
-git tag -f v1 v1.0.0 && git push -f origin v1
+gh workflow run release.yml -f version=v1.2.3
 ```
+
+It runs against the branch or tag you dispatch it on, and from that commit it checks the version is
+well-formed and unused, runs the tests, creates the tag and the GitHub release with generated notes,
+then moves `v1` to the same commit. Tests run before anything is tagged, because the major tag is
+what every consumer executes. Pass `-f prerelease=true` to publish without moving the major tag.
+
+Nothing else is needed for `uses: metalbear-co/jev-auto-approve@v1` to resolve — a GitHub Action is
+served from its git ref, not from a registry.
+
+Listing it on the **GitHub Marketplace** is optional and cannot be automated. A listing hangs off a
+release with a version tag, and "Publish this Action to the GitHub Marketplace" is a checkbox on the
+release form — so the workflow above gets you the tag and the release, and the first listing is a
+manual tick (draft the release in the UI, or cut it with the workflow and then edit it). Later
+releases then appear as versions on the existing listing.
+
+GitHub also requires a public repository, a single `action.yml` at the root whose `name` is unique
+across Marketplace, and two-factor authentication on the publishing account. The `branding` block
+supplies the listing's icon and colour.

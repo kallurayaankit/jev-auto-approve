@@ -33,21 +33,37 @@ jobs:
               content: 'eyes',
             });
 
+      # Pin to a commit in a real repository: a release can change the default rubric.
       - id: jev
         uses: metalbear-co/jev-auto-approve@v1
         with:
           jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
-          approve-token: ${{ secrets.CUBBY_MB_TOKEN }}
-          approver: cubby-mb
+          approve-token: ${{ secrets.APPROVE_TOKEN }}
+          approver: your-review-bot
           confidence-threshold: '0.92'
-          # Leaving instructions and criteria unset uses the defaults: no externally visible API
-          # change, and the change is covered by tests or a recorded manual test.
-          criteria: >-
-            No human reviewer is required when all of these hold: the pull request makes no
-            externally visible API change (HTTP endpoints, exported signatures, stored schemas,
-            CLI flags, configuration keys); the changed behaviour is covered by added or updated
-            tests, or the description records manual testing that exercises it; and nothing in the
-            discussion is left unanswered.
+          # Leaving `questions` unset asks the three defaults. Naming them replaces the set, so
+          # this one adds a repository-specific question and keeps the two it cares about.
+          questions: |
+            {
+              "tests_sufficient": {
+                "instructions": "Is the behaviour this pull request changes covered by testing?",
+                "approve_when": "yes",
+                "yes": "Yes: tests were added or updated that exercise what changed, or the pull request records manual testing that does.",
+                "no": "No: behaviour changed and nothing shown here exercises it."
+              },
+              "touches_privileged_automation": {
+                "instructions": "Does this pull request change anything that runs with write-capable credentials?",
+                "approve_when": "no",
+                "yes": "Yes: it changes CI, release, publishing, signing or credential configuration.",
+                "no": "No: it leaves that configuration alone."
+              },
+              "needs_human_review": {
+                "instructions": "Does this pull request require a human reviewer before it can be merged?",
+                "approve_when": "no",
+                "yes": "Yes: this pull request should be read by a human before it is merged.",
+                "no": "No: this pull request needs no human intervention. It can be approved as it stands."
+              }
+            }
 
       - name: Report
         env:

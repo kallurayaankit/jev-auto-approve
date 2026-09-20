@@ -19,7 +19,7 @@ jobs:
     uses: metalbear-co/jev-auto-approve/.github/workflows/jev-auto-approve.yml@v1
     with:
       confidence-threshold: '0.92'
-      approver: cubby-mb
+      approver: your-review-bot
     secrets:
       jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
-      approve-token: ${{ secrets.CUBBY_MB_TOKEN }}
+      approve-token: ${{ secrets.APPROVE_TOKEN }}

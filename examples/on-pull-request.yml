@@ -25,8 +25,8 @@ jobs:
       - uses: metalbear-co/jev-auto-approve@v1
         with:
           jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
-          approve-token: ${{ secrets.CUBBY_MB_TOKEN }}
-          approver: cubby-mb
+          approve-token: ${{ secrets.APPROVE_TOKEN }}
+          approver: your-review-bot
           confidence-threshold: '0.95'
           criteria: >-
             No human reviewer is required when the pull request is a patch or minor dependency

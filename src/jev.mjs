@@ -2,32 +2,24 @@ export const JEV_ENDPOINT = process.env.JEV_API_URL || 'https://api.typesafe.ai/
 
 export const QUESTION_KEY = 'needs_human_review';
 
-export const DEFAULT_INSTRUCTIONS = [
-  'Does this pull request require a human reviewer before it can be merged?',
-  'Weigh the evidence already on the pull request: a review a human has already left, and whether',
-  'everything they raised was addressed convincingly, counts towards no further human being needed.',
-].join(' ');
+export const DEFAULT_INSTRUCTIONS =
+  'Does this pull request require a human reviewer before it can be merged?';
 
+// Each side says what the answer means. Directives ("weigh this", "answer yes when") belong in
+// neither: the question is the question, and the criteria are the definitions it is answered against.
 export const DEFAULT_CRITERIA = {
   false: [
-    'No human reviewer is required when the change is verified and its reach is small enough that a',
-    'mistake would be caught before it hurt anyone. Weigh these together:',
-    '1. Verification. Tests were added or updated to cover the behaviour that changed, or the pull',
-    'request records manual testing that actually exercises it.',
-    '2. Review already done. A human reviewed this pull request and everything they raised was',
-    'addressed, in the code or in an answer that holds up.',
-    '3. Reach. How much depends on this change. An externally visible change - HTTP endpoints and',
-    'their payloads, public function or method signatures, exported types, stored schemas, CLI flags,',
-    'configuration keys - weighs towards needing a human, and weighs more the more callers it can',
-    'break. It does not on its own require one: a small, deliberate, tested change to an external',
-    'interface that the pull request explains can still be fine.',
+    'No: the change is verified, and how far it reaches is understood.',
+    'Behaviour that changed is covered by tests that were added or updated, or by manual testing the pull request records.',
+    'Where a human has already reviewed it, what they raised was addressed - in the code, or in an answer that holds up.',
+    'Where the change reaches past this codebase - HTTP endpoints and their payloads, public function or method signatures, exported types, stored schemas, CLI flags, configuration keys - it is small and deliberate, and the pull request accounts for the callers it affects.',
   ].join('\n'),
   true: [
-    'A human reviewer is required when the change is unverified - behaviour changed with neither',
-    'tests nor a record of manual testing - when something raised in review is unaddressed or',
-    'brushed aside, or when the change reaches far enough that getting it wrong breaks callers who',
-    'had no say in it.',
-    'Answer yes when the diff does not give you enough to tell.',
+    'Yes: something about the change is unsettled.',
+    'Behaviour changed with neither tests nor a record of manual testing.',
+    'Or something raised in review is unaddressed, or answered in a way that does not hold up.',
+    'Or the change alters something others depend on, and the consequences for them are not accounted for.',
+    'Or the pull request does not show enough to tell which of these is the case.',
   ].join('\n'),
 };
 

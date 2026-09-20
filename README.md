@@ -45,8 +45,8 @@ jobs:
       - uses: metalbear-co/jev-auto-approve@v1
         with:
           jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
-          approve-token: ${{ secrets.CUBBY_MB_TOKEN }}
-          approver: cubby-mb
+          approve-token: ${{ secrets.APPROVE_TOKEN }}
+          approver: your-review-bot
           confidence-threshold: '0.92'
 ```
 
@@ -68,6 +68,39 @@ uses: metalbear-co/jev-auto-approve@<commit-sha>
 The examples below use `@v1` for readability. If you override `instructions` and `criteria`
 yourself, the moving part is smaller — but the action still decides how the answer is read.
 
+## In the wild
+
+[mirrord](https://github.com/metalbear-co/mirrord) runs this on demand: an org member comments
+`/jev-approve` on a pull request, and the review is submitted by a GitHub App rather than a bot
+user. The whole thing is
+[`.github/workflows/jev-auto-approve.yaml`](https://github.com/metalbear-co/mirrord/blob/main/.github/workflows/jev-auto-approve.yaml);
+the part that matters:
+
+```yaml
+      - name: Get token for the cubby-mb app
+        id: app-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.CUBBY_CLIENT_ID }}
+          private-key: ${{ secrets.CUBBY_PRIVATE_KEY }}
+          permission-pull-requests: write
+
+      - name: Ask Jev whether this needs a human
+        uses: metalbear-co/jev-auto-approve@<commit-sha>
+        with:
+          jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
+          # An app installation token has no user identity, so `approver` is deliberately unset.
+          approve-token: ${{ steps.app-token.outputs.token }}
+          confidence-threshold: '0.95'
+          criteria: >-
+            ...the repository's own rubric...
+```
+
+Two things it does that are worth copying. The workflow token is `pull-requests: read` only — the
+app token is the single thing that can submit a review. And its `criteria` keep privileged
+automation out of reach: anything under `.github/`, or the release, publishing and signing
+configuration, needs a human whatever else the change does.
+
 ## The question and the rubric
 
 Two inputs shape the decision.
@@ -76,22 +109,26 @@ Two inputs shape the decision.
 
 > Does this pull request require a human reviewer before it can be merged?
 
-**`criteria`** describes when *no* human reviewer is required — the side of the answer that gates
-the approval. The default weighs three things together rather than applying a checklist:
+**`criteria`** says what each answer *means*. Not what to do, and not what to weigh — the two sides
+describe the pull request that each answer denotes, and the model decides which one it is looking at.
 
-- **Verification** — tests added or updated for the behaviour that changed, or a record of manual
-  testing that exercises it.
-- **Review already done** — a human reviewed the pull request and everything they raised was
-  addressed, in the code or in an answer that holds up.
-- **Reach** — how much depends on the change. An externally visible change (endpoints, exported
-  signatures, stored schemas, CLI flags, config keys) *weighs towards* needing a human, more so the
-  more callers it can break. It is not a veto: a small, deliberate, tested change to an external
-  interface that the pull request explains can still pass.
+**No** means the change is verified and how far it reaches is understood: behaviour that changed is
+covered by tests or by recorded manual testing; anything an earlier human reviewer raised was
+addressed, in the code or in an answer that holds up; and where the change reaches past the codebase
+(endpoints, exported signatures, stored schemas, CLI flags, config keys) it is small and deliberate,
+with the affected callers accounted for.
 
-The built-in wording for the other side ends with *"answer yes when the diff does not give you
-enough to tell"*, so missing context pushes toward a human rather than toward an approval. Set
-`criteria` to free text to replace the no-human side, or pass a JSON object with `true` and `false`
-string keys to phrase both sides yourself.
+**Yes** means something is unsettled: behaviour changed with no tests and no recorded manual test; or
+review feedback is unaddressed or answered unconvincingly; or the change alters something others
+depend on without accounting for the consequences; or the pull request does not show enough to tell.
+
+Reaching past the codebase therefore shapes the answer without settling it on its own — a small,
+explained, tested interface change can still be a *no*.
+
+Missing context lands on *yes* by definition — "the pull request does not show enough to tell" is
+part of what yes means — so a thin diff pushes toward a human rather than toward an approval. Set
+`criteria` to free text to replace the no side, or pass a JSON object with `true` and `false` string
+keys to phrase both yourself.
 
 ## What Jev sees
 
@@ -154,13 +191,13 @@ tokens the call cost, the model, and a link to the workflow run:
 
 `approve-token` decides which account the review comes from. Three options:
 
-- **A bot user's PAT** (how we use it — `cubby-mb`). Fine-grained token on the repo with
-  *Pull requests: read and write*. Set `approver: cubby-mb` so a token swap fails loudly instead of
-  approving as the wrong identity.
-- **A GitHub App installation token**, minted in the job with
+- **A GitHub App installation token** (what [mirrord](#in-the-wild) uses), minted in the job with
   [`actions/create-github-app-token`](https://github.com/actions/create-github-app-token). Leave
   `approver` empty — installation tokens have no user identity to verify, and the action warns
   rather than failing if you set it anyway.
+- **A bot user's PAT.** A fine-grained token on the repo with *Pull requests: read and write*. Set
+  `approver` to that account's login so a token swap fails loudly instead of approving as the wrong
+  identity.
 - **`GITHUB_TOKEN`**. It can approve, but the review is attributed to `github-actions[bot]` and does
   **not** satisfy required-approval branch protection. Useful for testing, not for a merge gate.
 

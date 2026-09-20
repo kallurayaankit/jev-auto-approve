@@ -71,14 +71,16 @@ test('empty inputs fall back to the built-in question and rubric', () => {
   const question = buildQuestions({ instructions: '  ', criteria: '' })[QUESTION_KEY];
   assert.equal(question.instructions, DEFAULT_INSTRUCTIONS);
   assert.deepEqual(question.criteria, DEFAULT_CRITERIA);
-  assert.match(question.instructions, /require a human reviewer/);
-  // An existing review that was addressed counts towards no further human being needed.
-  assert.match(question.instructions, /already left/);
-  assert.match(question.criteria.false, /Tests were added or updated|manual testing/);
-  assert.match(question.criteria.false, /A human reviewed this pull request/);
-  // An external change weighs on the answer rather than settling it.
-  assert.match(question.criteria.false, /weighs towards needing a human/);
-  assert.match(question.criteria.false, /does not on its own require one/);
+  // The question is only the question; each criteria side says what that answer means.
+  assert.equal(question.instructions, DEFAULT_INSTRUCTIONS);
+  assert.ok(question.criteria.false.startsWith('No:'));
+  assert.ok(question.criteria.true.startsWith('Yes:'));
+  assert.match(question.criteria.false, /tests that were added or updated, or by manual testing/);
+  // A review already addressed belongs to the no side.
+  assert.match(question.criteria.false, /what they raised was addressed/);
+  // Reaching past the codebase shapes the answer rather than settling it on its own.
+  assert.match(question.criteria.false, /reaches past this codebase/);
+  assert.match(question.criteria.true, /consequences for them are not accounted for/);
 });
 
 test('criteria can be given as JSON to phrase both sides', () => {

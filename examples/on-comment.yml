@@ -38,8 +38,8 @@ jobs:
         uses: metalbear-co/jev-auto-approve@v1
         with:
           jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
-          approve-token: ${{ secrets.CUBBY_MB_TOKEN }}
-          approver: cubby-mb
+          approve-token: ${{ secrets.APPROVE_TOKEN }}
+          approver: your-review-bot
           confidence-threshold: '0.92'
           # Leaving instructions and criteria unset uses the defaults: no externally visible API
           # change, and the change is covered by tests or a recorded manual test.

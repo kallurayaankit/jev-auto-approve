@@ -204,7 +204,12 @@ what every consumer executes. Pass `-f prerelease=true` to publish without movin
 Nothing else is needed for `uses: metalbear-co/jev-auto-approve@v1` to resolve — a GitHub Action is
 served from its git ref, not from a registry.
 
-Listing it on the **GitHub Marketplace** is optional and cannot be automated: it is a checkbox on
-the release page ("Publish this Action to the Marketplace"), which requires accepting the developer
-agreement once and a Marketplace-unique `name` in `action.yml`. The root `action.yml` and its
-`branding` block are already in the shape Marketplace requires.
+Listing it on the **GitHub Marketplace** is optional and cannot be automated. A listing hangs off a
+release with a version tag, and "Publish this Action to the GitHub Marketplace" is a checkbox on the
+release form — so the workflow above gets you the tag and the release, and the first listing is a
+manual tick (draft the release in the UI, or cut it with the workflow and then edit it). Later
+releases then appear as versions on the existing listing.
+
+GitHub also requires a public repository, a single `action.yml` at the root whose `name` is unique
+across Marketplace, and two-factor authentication on the publishing account. The `branding` block
+supplies the listing's icon and colour.

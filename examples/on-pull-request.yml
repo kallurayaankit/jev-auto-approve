@@ -27,6 +27,6 @@ jobs:
           approve-token: ${{ secrets.CUBBY_MB_TOKEN }}
           approver: cubby-mb
           confidence-threshold: '0.95'
-          prompt: >-
-            This is an automated dependency update. Approve only patch or minor version bumps with
-            no source changes beyond the manifest and lockfile.
+          criteria: >-
+            No human reviewer is required when the pull request is a patch or minor dependency
+            bump that touches nothing beyond the manifest and lockfile, and CI covers the change.

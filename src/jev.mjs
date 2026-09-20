@@ -1,20 +1,104 @@
 export const JEV_ENDPOINT = process.env.JEV_API_URL || 'https://api.typesafe.ai/v1/systemone';
 
-export const DEFAULT_PROMPT = [
-  'You are the last reviewer before this pull request merges.',
-  'Approve only when the change is correct, self-consistent, and safe to ship as-is:',
-  'no obvious defect, no unhandled failure path introduced, no secret or credential added,',
-  'no silent behaviour change that callers are not prepared for, and tests updated when the',
-  'change needs them. Anything you are unsure about belongs with a human.',
-].join(' ');
+export const QUESTION_KEY = 'needs_human_review';
 
-export const VERDICT_CRITERIA = {
-  approve: 'The change is correct and safe to merge as-is; a human reviewer would add nothing.',
-  request_changes:
-    'The change has a defect, a risk, a missing test, or anything else a human should look at before merge.',
+export const DEFAULT_INSTRUCTIONS =
+  'Does this pull request require a human reviewer before it can be merged?';
+
+export const DEFAULT_CRITERIA = {
+  false: [
+    'No human reviewer is required when both of these hold:',
+    '1. The pull request makes no externally visible API change. Nothing that callers depend on is added, removed, renamed, or changed in type or meaning: HTTP endpoints and their payloads, public function or method signatures, exported types, stored schemas, CLI flags, and configuration keys.',
+    '2. The change is verified. Either sufficient tests were added or updated to cover the behaviour that changed, or the pull request records manual testing that actually exercises it.',
+  ].join('\n'),
+  true: [
+    'A human reviewer is required when either condition fails: the pull request changes an externally visible API, or behaviour changed without tests covering it and without a record of manual testing that does.',
+    'Answer yes when the diff does not give you enough to tell.',
+  ].join('\n'),
 };
 
-export function buildState({ pullRequest, diff, truncated }) {
+/**
+ * The criteria input is free text describing when no human reviewer is needed, which is the side
+ * that gates the approval. A JSON object with `true` and `false` keys is passed through instead,
+ * for callers who want to phrase both sides themselves.
+ */
+export function parseCriteria(raw) {
+  const text = (raw ?? '').trim();
+  if (!text) return DEFAULT_CRITERIA;
+
+  if (text.startsWith('{')) {
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      throw new Error(`criteria looks like JSON but could not be parsed: ${err.message}`);
+    }
+    const hasSide = (key) => typeof parsed?.[key] === 'string' && parsed[key].trim();
+    if (!hasSide('true') || !hasSide('false')) {
+      throw new Error('criteria given as JSON must be an object with non-empty "true" and "false" strings.');
+    }
+    return { true: parsed.true.trim(), false: parsed.false.trim() };
+  }
+
+  return { false: text, true: DEFAULT_CRITERIA.true };
+}
+
+// Marks the action's own comments so a previous run's verdict is not fed back in as discussion.
+export const COMMENT_MARKER = '<!-- jev-auto-approve -->';
+
+const MAX_COMMENT_CHARS = 2000;
+const MAX_COMMENTS = 50;
+
+function trim(text) {
+  const body = (text ?? '').trim();
+  if (!body) return '(empty)';
+  return body.length > MAX_COMMENT_CHARS ? `${body.slice(0, MAX_COMMENT_CHARS)}\n[... comment truncated]` : body;
+}
+
+const isOwnComment = (comment) => (comment.body ?? '').includes(COMMENT_MARKER);
+
+/**
+ * Renders the pull request discussion: the conversation, inline comments on the diff, and any
+ * review already submitted. Ordered oldest first so the thread reads as it happened.
+ */
+export function formatDiscussion({ issueComments = [], reviewComments = [], reviews = [], unavailable = false }) {
+  if (unavailable) {
+    return ['Discussion: could not be retrieved, so any concerns raised on this pull request are NOT shown below.'];
+  }
+
+  const entries = [
+    ...issueComments
+      .filter((comment) => !isOwnComment(comment))
+      .map((comment) => ({
+        at: comment.created_at,
+        line: `[comment by @${comment.user?.login ?? 'unknown'}]\n${trim(comment.body)}`,
+      })),
+    ...reviewComments.map((comment) => ({
+      at: comment.created_at,
+      line: `[review comment by @${comment.user?.login ?? 'unknown'} on ${comment.path}${
+        comment.line ? `:${comment.line}` : ''
+      }]\n${trim(comment.body)}`,
+    })),
+    ...reviews
+      .filter((review) => review.state !== 'PENDING' && !isOwnComment(review))
+      .map((review) => ({
+        at: review.submitted_at,
+        line: `[review by @${review.user?.login ?? 'unknown'} - ${review.state}]\n${trim(review.body)}`,
+      })),
+  ].sort((a, b) => String(a.at).localeCompare(String(b.at)));
+
+  if (entries.length === 0) return ['Discussion: no comments or reviews on this pull request.'];
+
+  const shown = entries.slice(-MAX_COMMENTS);
+  return [
+    `Discussion (${entries.length} comment(s)/review(s)${
+      shown.length < entries.length ? `, showing the most recent ${shown.length}` : ''
+    }):`,
+    ...shown.map((entry) => entry.line),
+  ];
+}
+
+export function buildState({ pullRequest, diff, truncated, discussion = {} }) {
   const labels = (pullRequest.labels || []).map((label) => label.name).join(', ') || 'none';
   return [
     `Repository: ${pullRequest.base?.repo?.full_name ?? 'unknown'}`,
@@ -28,6 +112,8 @@ export function buildState({ pullRequest, diff, truncated }) {
     'Description:',
     (pullRequest.body || '(no description)').trim(),
     '',
+    ...formatDiscussion(discussion),
+    '',
     truncated
       ? 'Diff (TRUNCATED - the full diff exceeded the size budget, so part of the change is not shown below):'
       : 'Diff:',
@@ -35,14 +121,12 @@ export function buildState({ pullRequest, diff, truncated }) {
   ].join('\n');
 }
 
-export function buildQuestions({ prompt }) {
-  const instructions = [prompt?.trim() || DEFAULT_PROMPT, 'Decide whether this pull request can be approved as-is.']
-    .join('\n\n');
+export function buildQuestions({ instructions, criteria }) {
   return {
-    verdict: {
-      type: 'choice',
-      instructions,
-      criteria: VERDICT_CRITERIA,
+    [QUESTION_KEY]: {
+      type: 'noul',
+      instructions: instructions?.trim() || DEFAULT_INSTRUCTIONS,
+      criteria: parseCriteria(criteria),
     },
   };
 }
@@ -92,43 +176,25 @@ export function parseThreshold(raw) {
 }
 
 /**
- * The approval gate. A choice answer carries both the picked option and a calibrated confidence,
- * so both have to line up: Jev has to pick approve, and be confident enough about it.
+ * The approval gate. A noul answer is the probability that the question is answered yes, so the
+ * probability a human reviewer IS required. Its complement is how sure Jev is that nobody needs to
+ * look, and that is what the threshold is compared against.
  */
 export function decide(answer, threshold) {
-  if (!answer || typeof answer.choice !== 'string' || typeof answer.confidence !== 'number') {
+  if (!answer || typeof answer.noul !== 'number' || answer.noul < 0 || answer.noul > 1) {
     throw new Error(`Unexpected Jev answer shape: ${JSON.stringify(answer)}`);
   }
-  const { choice: verdict, confidence } = answer;
-  const probabilities = answer.probabilities ?? {};
-  const approveProbability = typeof probabilities.approve === 'number' ? probabilities.approve : null;
+  const needsHumanProbability = answer.noul;
+  const confidence = 1 - needsHumanProbability;
+  const approved = confidence >= threshold;
 
-  if (verdict !== 'approve') {
-    return {
-      approved: false,
-      verdict,
-      confidence,
-      approveProbability,
-      probabilities,
-      reason: `Jev returned "${verdict}" (confidence ${confidence.toFixed(3)}), so the pull request was not approved.`,
-    };
-  }
-  if (confidence < threshold) {
-    return {
-      approved: false,
-      verdict,
-      confidence,
-      approveProbability,
-      probabilities,
-      reason: `Jev returned "approve" but confidence ${confidence.toFixed(3)} is below the threshold of ${threshold}.`,
-    };
-  }
   return {
-    approved: true,
-    verdict,
+    approved,
+    verdict: approved ? 'approve' : 'human_review_required',
     confidence,
-    approveProbability,
-    probabilities,
-    reason: `Jev returned "approve" with confidence ${confidence.toFixed(3)} (threshold ${threshold}).`,
+    needsHumanProbability,
+    reason: approved
+      ? `Jev put the probability that a human reviewer is required at ${needsHumanProbability.toFixed(3)}, so confidence that none is required is ${confidence.toFixed(3)} (threshold ${threshold}).`
+      : `Jev put the probability that a human reviewer is required at ${needsHumanProbability.toFixed(3)}, so confidence that none is required is ${confidence.toFixed(3)}, below the threshold of ${threshold}.`,
   };
 }

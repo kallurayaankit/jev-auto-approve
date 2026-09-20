@@ -67,6 +67,17 @@ export const getPullRequestDiff = ({ token, owner, repo, number }) =>
     accept: 'application/vnd.github.diff',
   });
 
+const listFirstPage = (path, token) => request(`${path}?per_page=100`, { token });
+
+export const listIssueComments = ({ token, owner, repo, number }) =>
+  listFirstPage(`/repos/${owner}/${repo}/issues/${number}/comments`, token);
+
+export const listReviewComments = ({ token, owner, repo, number }) =>
+  listFirstPage(`/repos/${owner}/${repo}/pulls/${number}/comments`, token);
+
+export const listReviews = ({ token, owner, repo, number }) =>
+  listFirstPage(`/repos/${owner}/${repo}/pulls/${number}/reviews`, token);
+
 export const submitApproval = ({ token, owner, repo, number, body }) =>
   request(`/repos/${owner}/${repo}/pulls/${number}/reviews`, {
     token,

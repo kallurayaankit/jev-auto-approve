@@ -15,12 +15,17 @@ on:
   workflow_call:
     inputs:
       confidence-threshold:
-        description: 'Minimum Jev confidence (0-1) required to approve.'
+        description: 'Minimum confidence (0-1) that no human reviewer is required.'
         type: string
         required: false
         default: '0.9'
-      prompt:
-        description: 'Extra instructions describing what this repository considers approvable.'
+      instructions:
+        description: 'The question put to Jev. Defaults to whether a human reviewer is required.'
+        type: string
+        required: false
+        default: ''
+      criteria:
+        description: 'Free text describing when no human reviewer is required.'
         type: string
         required: false
         default: ''
@@ -62,7 +67,7 @@ on:
         description: '"true" when an approving review was submitted.'
         value: ${{ jobs.jev-auto-approve.outputs.approved }}
       verdict:
-        description: 'The choice Jev returned.'
+        description: 'approve, or human_review_required.'
         value: ${{ jobs.jev-auto-approve.outputs.verdict }}
       confidence:
         description: 'Jev confidence for the verdict.'
@@ -85,7 +90,8 @@ jobs:
           jev-api-key: ${{ secrets.jev-api-key }}
           approve-token: ${{ secrets.approve-token }}
           confidence-threshold: ${{ inputs.confidence-threshold }}
-          prompt: ${{ inputs.prompt }}
+          instructions: ${{ inputs.instructions }}
+          criteria: ${{ inputs.criteria }}
           approver: ${{ inputs.approver }}
           pr-number: ${{ inputs.pr-number }}
           model: ${{ inputs.model }}

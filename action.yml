@@ -18,13 +18,23 @@ inputs:
       satisfy "required approvals" on protected branches.
     required: true
   confidence-threshold:
-    description: 'Minimum Jev confidence (0-1) required to approve. Below this the run skips.'
+    description: >-
+      Minimum confidence (0-1) that no human reviewer is required, i.e. one minus the probability
+      Jev returns. Below this the run skips.
     required: false
     default: '0.9'
-  prompt:
+  instructions:
     description: >-
-      Extra instructions handed to Jev describing what this repository considers approvable.
-      Prepended to the verdict question. Leave empty to use the built-in review rubric.
+      The question put to Jev. Defaults to "Does this pull request require a human reviewer before
+      it can be merged?" - the action approves when the answer is confidently no.
+    required: false
+    default: ''
+  criteria:
+    description: >-
+      Free text describing when NO human reviewer is required; this is the rubric the approval
+      turns on. Defaults to: no externally visible API change, and the change is verified by tests
+      or a record of manual testing. Pass a JSON object with "true" and "false" string keys to
+      phrase both sides yourself.
     required: false
     default: ''
   approver:
@@ -63,13 +73,11 @@ outputs:
   approved:
     description: '"true" when an approving review was submitted.'
   verdict:
-    description: 'The choice Jev returned: approve or request_changes.'
+    description: 'approve, or human_review_required.'
   confidence:
-    description: 'Jev confidence for the verdict, 0-1.'
-  approve-probability:
-    description: 'Probability Jev assigned to the approve option, 0-1.'
-  probabilities:
-    description: 'Full probability map from Jev, as JSON.'
+    description: 'Confidence that no human reviewer is required, 0-1.'
+  needs-human-probability:
+    description: 'Probability Jev returned that a human reviewer is required, 0-1.'
   pr-number:
     description: 'Pull request that was evaluated.'
   reason:

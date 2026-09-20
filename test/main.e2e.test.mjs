@@ -24,22 +24,27 @@ const PULL_REQUEST = {
   deletions: 1,
 };
 
-function jevAnswer(confidence, choice = 'approve') {
+// noul is the probability that the answer to "does this need a human reviewer?" is yes.
+function jevAnswer(needsHuman) {
   return {
     model: 'jev-1.13.0',
-    answers: {
-      verdict: {
-        type: 'choice',
-        choice,
-        confidence,
-        probabilities: { approve: confidence, request_changes: 1 - confidence },
-      },
-    },
-    usage: { input_tokens: 10, output_tokens: 2 },
+    answers: { needs_human_review: { type: 'noul', noul: needsHuman } },
+    usage: { input_tokens: 1234, output_tokens: 20 },
   };
 }
 
-async function startStub({ jevResponse }) {
+const ISSUE_COMMENTS = [
+  { created_at: '2026-01-02', user: { login: 'alice' }, body: 'Did you run this against staging?' },
+  { created_at: '2026-01-03', user: { login: 'cubby-mb' }, body: '<!-- jev-auto-approve --> an earlier verdict' },
+];
+const REVIEW_COMMENTS = [
+  { created_at: '2026-01-04', user: { login: 'bob' }, path: 'README.md', line: 3, body: 'typo of a typo fix' },
+];
+const REVIEWS = [
+  { submitted_at: '2026-01-05', user: { login: 'bob' }, state: 'COMMENTED', body: 'looks fine to me' },
+];
+
+async function startStub({ jevResponse, forbidDiscussion = false }) {
   const seen = [];
   const server = http.createServer((req, res) => {
     let body = '';
@@ -56,6 +61,10 @@ async function startStub({ jevResponse }) {
           ? send(200, 'diff --git a/README.md b/README.md\n+fixed\n', 'text/plain')
           : send(200, PULL_REQUEST);
       }
+      if (req.url.includes('per_page=100') && forbidDiscussion) return send(403, { message: 'forbidden' });
+      if (req.url === '/repos/acme/widgets/pulls/5/reviews?per_page=100') return send(200, REVIEWS);
+      if (req.url === '/repos/acme/widgets/pulls/5/comments?per_page=100') return send(200, REVIEW_COMMENTS);
+      if (req.url === '/repos/acme/widgets/issues/5/comments?per_page=100') return send(200, ISSUE_COMMENTS);
       if (req.url === '/repos/acme/widgets/pulls/5/reviews') return send(200, { id: 1, state: 'APPROVED' });
       if (req.url === '/repos/acme/widgets/issues/5/comments') return send(201, { id: 2 });
       if (req.url === '/v1/systemone') return send(200, jevResponse);
@@ -80,8 +89,8 @@ function parseOutputs(raw) {
   return outputs;
 }
 
-async function runAction({ jevResponse, inputs = {} }) {
-  const { server, seen, base } = await startStub({ jevResponse });
+async function runAction({ jevResponse, inputs = {}, forbidDiscussion = false }) {
+  const { server, seen, base } = await startStub({ jevResponse, forbidDiscussion });
   const dir = mkdtempSync(join(tmpdir(), 'jev-auto-approve-'));
   const eventPath = join(dir, 'event.json');
   const outputPath = join(dir, 'output.txt');
@@ -101,11 +110,15 @@ async function runAction({ jevResponse, inputs = {} }) {
         GITHUB_EVENT_PATH: eventPath,
         GITHUB_OUTPUT: outputPath,
         GITHUB_STEP_SUMMARY: join(dir, 'summary.md'),
+        GITHUB_SERVER_URL: 'https://github.com',
+        GITHUB_RUN_ID: '42',
+        GITHUB_RUN_ATTEMPT: '1',
         'INPUT_JEV-API-KEY': 'jev-key',
         'INPUT_APPROVE-TOKEN': 'bot-token',
         'INPUT_GITHUB-TOKEN': 'read-token',
         'INPUT_CONFIDENCE-THRESHOLD': '0.9',
-        INPUT_PROMPT: 'Approve documentation-only changes.',
+        INPUT_INSTRUCTIONS: 'Does this pull request require a human reviewer?',
+        INPUT_CRITERIA: 'No human reviewer is required for documentation-only changes.',
         INPUT_APPROVER: 'cubby-mb',
         INPUT_MODEL: 'jev-latest',
         'INPUT_DRY-RUN': 'false',
@@ -124,25 +137,43 @@ async function runAction({ jevResponse, inputs = {} }) {
 }
 
 test('approves the pull request as the approve-token identity', async () => {
-  const { status, seen, outputs, stdout } = await runAction({ jevResponse: jevAnswer(0.97) });
+  const { status, seen, outputs, stdout } = await runAction({ jevResponse: jevAnswer(0.02) });
   assert.equal(status, 0);
   assert.equal(outputs.approved, 'true');
   assert.equal(outputs.verdict, 'approve');
+  assert.equal(outputs['needs-human-probability'], '0.02');
   assert.equal(outputs['pr-number'], '5');
 
-  const review = seen.find((call) => call.url.endsWith('/reviews'));
+  const review = seen.find((call) => call.method === 'POST' && call.url.endsWith('/pulls/5/reviews'));
   assert.ok(review, 'expected an approving review');
-  assert.equal(JSON.parse(review.body).event, 'APPROVE');
+  const submitted = JSON.parse(review.body);
+  assert.equal(submitted.event, 'APPROVE');
   assert.equal(review.auth, 'Bearer bot-token');
+  // The comment carries the verdict, the confidence, the tokens spent, and a link to the run.
+  assert.match(submitted.body, /\| Verdict \| `approve` \|/);
+  assert.match(submitted.body, /Confidence no human reviewer is required \| `0\.980`/);
+  assert.match(submitted.body, /Tokens \| `1234` in \/ `20` out/);
+  assert.match(submitted.body, /https:\/\/github\.com\/acme\/widgets\/actions\/runs\/42\/attempts\/1/);
+
   // The PR is read with the read token, never the approving one.
   assert.equal(seen.find((call) => call.accept?.includes('diff')).auth, 'Bearer read-token');
   // Secrets are masked in the log.
   assert.match(stdout, /::add-mask::jev-key/);
 
   const jev = JSON.parse(seen.find((call) => call.url === '/v1/systemone').body);
-  assert.match(jev.state, /Fix typo in the README/);
-  assert.match(jev.state, /diff --git/);
-  assert.match(jev.questions.verdict.instructions, /Approve documentation-only changes\./);
+  assert.match(jev.state, /Fix typo in the README/, 'title');
+  assert.match(jev.state, /One word\./, 'description');
+  assert.match(jev.state, /Did you run this against staging\?/, 'issue comment');
+  assert.match(jev.state, /review comment by @bob on README\.md:3/, 'inline review comment');
+  assert.match(jev.state, /review by @bob - COMMENTED/, 'submitted review');
+  assert.match(jev.state, /diff --git/, 'diff');
+  // A previous verdict from this action is not fed back in as discussion.
+  assert.ok(!jev.state.includes('an earlier verdict'));
+
+  const question = jev.questions.needs_human_review;
+  assert.equal(question.type, 'noul');
+  assert.equal(question.instructions, 'Does this pull request require a human reviewer?');
+  assert.match(question.criteria.false, /documentation-only changes\./);
 });
 
 test('comments instead of approving when confidence is below the threshold', async () => {
@@ -152,14 +183,22 @@ test('comments instead of approving when confidence is below the threshold', asy
   });
   assert.equal(status, 0);
   assert.equal(outputs.approved, 'false');
+  assert.equal(outputs.verdict, 'human_review_required');
   assert.match(outputs.reason, /below the threshold/);
-  assert.ok(!seen.some((call) => call.url.endsWith('/reviews')));
-  assert.ok(seen.some((call) => call.url.endsWith('/issues/5/comments')));
+  assert.ok(!seen.some((call) => call.method === 'POST' && call.url.endsWith('/pulls/5/reviews')));
+  const comment = seen.find((call) => call.method === 'POST' && call.url.endsWith('/issues/5/comments'));
+  assert.ok(comment, 'expected an explanatory comment');
+  const body = JSON.parse(comment.body).body;
+  assert.match(body, /\| Verdict \| `human_review_required` \|/);
+  assert.match(body, /Tokens \| `1234` in \/ `20` out/);
+  assert.match(body, /actions\/runs\/42/);
+  // Carries the marker so the next run does not read its own verdict back as discussion.
+  assert.match(body, /<!-- jev-auto-approve -->/);
 });
 
 test('dry-run submits nothing', async () => {
   const { status, seen, outputs } = await runAction({
-    jevResponse: jevAnswer(0.99),
+    jevResponse: jevAnswer(0.01),
     inputs: { 'INPUT_DRY-RUN': 'true' },
   });
   assert.equal(status, 0);
@@ -167,9 +206,19 @@ test('dry-run submits nothing', async () => {
   assert.ok(!seen.some((call) => call.method === 'POST' && call.url.startsWith('/repos')));
 });
 
+test('a discussion the token cannot read is reported to Jev as missing', async () => {
+  const { status, seen } = await runAction({
+    jevResponse: jevAnswer(0.02),
+    forbidDiscussion: true,
+  });
+  assert.equal(status, 0);
+  const jev = JSON.parse(seen.find((call) => call.url === '/v1/systemone').body);
+  assert.match(jev.state, /Discussion: could not be retrieved/);
+});
+
 test('fails when the approve-token is not the expected approver', async () => {
   const { status, stdout, seen } = await runAction({
-    jevResponse: jevAnswer(0.99),
+    jevResponse: jevAnswer(0.01),
     inputs: { INPUT_APPROVER: 'someone-else' },
   });
   assert.equal(status, 1);
@@ -178,10 +227,10 @@ test('fails when the approve-token is not the expected approver', async () => {
   assert.ok(!seen.some((call) => call.url === '/v1/systemone'));
 });
 
-test('skips a request_changes verdict without touching the pull request', async () => {
-  const { status, outputs, seen } = await runAction({ jevResponse: jevAnswer(0.99, 'request_changes') });
+test('a confident yes - a human is needed - does not approve', async () => {
+  const { status, outputs, seen } = await runAction({ jevResponse: jevAnswer(0.99) });
   assert.equal(status, 0);
   assert.equal(outputs.approved, 'false');
-  assert.equal(outputs.verdict, 'request_changes');
-  assert.ok(!seen.some((call) => call.url.endsWith('/reviews')));
+  assert.equal(outputs.verdict, 'human_review_required');
+  assert.ok(!seen.some((call) => call.method === 'POST' && call.url.endsWith('/pulls/5/reviews')));
 });

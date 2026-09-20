@@ -40,10 +40,14 @@ jobs:
           approve-token: ${{ secrets.CUBBY_MB_TOKEN }}
           approver: cubby-mb
           confidence-threshold: '0.92'
-          prompt: >-
-            This repository ships to production on merge to main. Approve only changes that are
-            self-contained, covered by tests where behaviour changed, and free of migrations or
-            credential handling.
+          # Leaving instructions and criteria unset uses the defaults: no externally visible API
+          # change, and the change is covered by tests or a recorded manual test.
+          criteria: >-
+            No human reviewer is required when all of these hold: the pull request makes no
+            externally visible API change (HTTP endpoints, exported signatures, stored schemas,
+            CLI flags, configuration keys); the changed behaviour is covered by added or updated
+            tests, or the description records manual testing that exercises it; and nothing in the
+            discussion is left unanswered.
 
       - name: Report
         env:

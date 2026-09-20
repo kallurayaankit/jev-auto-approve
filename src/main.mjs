@@ -15,27 +15,80 @@ import {
   getPullRequest,
   getPullRequestDiff,
   getTokenLogin,
+  listIssueComments,
+  listReviewComments,
+  listReviews,
   parseRepository,
   resolvePullRequestNumber,
   submitApproval,
 } from './github.mjs';
-import { buildQuestions, buildState, callJev, decide, parseThreshold, truncateDiff } from './jev.mjs';
+import {
+  buildQuestions,
+  buildState,
+  callJev,
+  COMMENT_MARKER,
+  decide,
+  parseThreshold,
+  QUESTION_KEY,
+  truncateDiff,
+} from './jev.mjs';
 
-function reviewBody({ decision, model, threshold }) {
+const ACTION_URL = 'https://github.com/metalbear-co/jev-auto-approve';
+
+/** Link back to the run that produced the verdict, so the logs are one click from the comment. */
+function workflowRunUrl() {
+  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT } = process.env;
+  if (!GITHUB_REPOSITORY || !GITHUB_RUN_ID) return null;
+  const server = (GITHUB_SERVER_URL || 'https://github.com').replace(/\/$/, '');
+  const attempt = GITHUB_RUN_ATTEMPT ? `/attempts/${GITHUB_RUN_ATTEMPT}` : '';
+  return `${server}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}${attempt}`;
+}
+
+function reviewBody({ decision, model, threshold, usage = {} }) {
+  const inputTokens = usage.input_tokens ?? 'unknown';
+  const outputTokens = usage.output_tokens ?? 'unknown';
+  const runUrl = workflowRunUrl();
   return [
+    COMMENT_MARKER,
     '🤖 **Jev auto-approve**',
     '',
-    `Verdict: \`${decision.verdict}\` · confidence \`${decision.confidence.toFixed(3)}\` · threshold \`${threshold}\``,
-    decision.approveProbability !== null
-      ? `Probability of approve: \`${decision.approveProbability.toFixed(3)}\``
-      : null,
+    '| | |',
+    '| --- | --- |',
+    `| Verdict | \`${decision.verdict}\` |`,
+    `| Confidence no human reviewer is required | \`${decision.confidence.toFixed(3)}\` (threshold \`${threshold}\`) |`,
+    `| Probability a human reviewer is required | \`${decision.needsHumanProbability.toFixed(3)}\` |`,
+    `| Tokens | \`${inputTokens}\` in / \`${outputTokens}\` out |`,
+    `| Model | \`${model}\` |`,
+    runUrl ? `| Run | [workflow run](${runUrl}) |` : null,
     '',
     decision.reason,
     '',
-    `<sub>Model: \`${model}\`. This approval is automated — it is a gate, not a substitute for a human reviewer.</sub>`,
+    `<sub>Posted by [jev-auto-approve](${ACTION_URL}) — automated verdict, a gate, not a substitute for a human reviewer.</sub>`,
   ]
     .filter((line) => line !== null)
     .join('\n');
+}
+
+/**
+ * Comments and reviews are context for the verdict, so losing them changes the answer rather than
+ * just thinning it. A permission gap is reported to the model as missing context instead of being
+ * passed off as an empty discussion.
+ */
+async function readDiscussion({ token, owner, repo, number }) {
+  try {
+    const [issueComments, reviewComments, reviews] = await Promise.all([
+      listIssueComments({ token, owner, repo, number }),
+      listReviewComments({ token, owner, repo, number }),
+      listReviews({ token, owner, repo, number }),
+    ]);
+    return { issueComments, reviewComments, reviews };
+  } catch (err) {
+    if (err.status === 403 || err.status === 404) {
+      warn(`Could not read the pull request discussion (${err.status}); Jev will be told it is missing.`);
+      return { unavailable: true };
+    }
+    throw err;
+  }
 }
 
 async function run() {
@@ -46,7 +99,8 @@ async function run() {
 
   const githubToken = getInput('github-token', { required: true });
   const threshold = parseThreshold(getInput('confidence-threshold', { default: '0.9' }));
-  const prompt = getInput('prompt');
+  const instructions = getInput('instructions');
+  const criteria = getInput('criteria');
   const approver = getInput('approver');
   const model = getInput('model', { default: 'jev-latest' });
   const dryRun = getBooleanInput('dry-run', false);
@@ -78,9 +132,10 @@ async function run() {
     }
   }
 
-  const [pullRequest, rawDiff] = await Promise.all([
+  const [pullRequest, rawDiff, discussion] = await Promise.all([
     getPullRequest({ token: githubToken, owner, repo, number }),
     getPullRequestDiff({ token: githubToken, owner, repo, number }),
+    readDiscussion({ token: githubToken, owner, repo, number }),
   ]);
 
   const { diff, truncated } = truncateDiff(rawDiff, maxDiffBytes);
@@ -89,19 +144,18 @@ async function run() {
   const response = await callJev({
     apiKey: jevApiKey,
     model,
-    state: buildState({ pullRequest, diff, truncated }),
-    questions: buildQuestions({ prompt }),
+    state: buildState({ pullRequest, diff, truncated, discussion }),
+    questions: buildQuestions({ instructions, criteria }),
   });
   info(`Jev usage: ${JSON.stringify(response.usage ?? {})}`);
 
-  const decision = decide(response.answers?.verdict, threshold);
+  const decision = decide(response.answers?.[QUESTION_KEY], threshold);
   setOutput('verdict', decision.verdict);
   setOutput('confidence', String(decision.confidence));
-  setOutput('approve-probability', decision.approveProbability === null ? '' : String(decision.approveProbability));
-  setOutput('probabilities', JSON.stringify(decision.probabilities));
+  setOutput('needs-human-probability', String(decision.needsHumanProbability));
   setOutput('reason', decision.reason);
 
-  const body = reviewBody({ decision, model: response.model ?? model, threshold });
+  const body = reviewBody({ decision, model: response.model ?? model, threshold, usage: response.usage });
 
   if (!decision.approved) {
     setOutput('approved', 'false');

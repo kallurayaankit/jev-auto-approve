@@ -15,17 +15,12 @@ on:
   workflow_call:
     inputs:
       confidence-threshold:
-        description: 'Minimum confidence (0-1) that no human reviewer is required.'
+        description: 'Minimum confidence (0-1) each question must reach on its approving side.'
         type: string
         required: false
         default: '0.9'
-      instructions:
-        description: 'The question put to Jev. Defaults to whether a human reviewer is required.'
-        type: string
-        required: false
-        default: ''
-      criteria:
-        description: 'Free text describing when no human reviewer is required.'
+      questions:
+        description: 'JSON object of question name -> {instructions, approve_when, yes, no}.'
         type: string
         required: false
         default: ''
@@ -92,8 +87,7 @@ jobs:
           jev-api-key: ${{ secrets.jev-api-key }}
           approve-token: ${{ secrets.approve-token }}
           confidence-threshold: ${{ inputs.confidence-threshold }}
-          instructions: ${{ inputs.instructions }}
-          criteria: ${{ inputs.criteria }}
+          questions: ${{ inputs.questions }}
           approver: ${{ inputs.approver }}
           pr-number: ${{ inputs.pr-number }}
           model: ${{ inputs.model }}

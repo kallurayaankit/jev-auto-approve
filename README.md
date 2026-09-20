@@ -4,20 +4,22 @@ A GitHub Action that asks [Jev](https://docs.typesafe.ai/api) whether a pull req
 reviewer, and approves it when the answer is confidently no.
 
 Jev is a decision model: it answers a typed question with a calibrated probability rather than
-prose. This action asks it one question —
-
-> Does this pull request require a human reviewer before it can be merged?
-
-— and approves when the confidence that none is required clears your threshold:
+prose. This action asks it one yes/no question per thing worth being sure about — answered in
+parallel in a single call — and approves only when every one of them clears your threshold:
 
 ```
-confidence = 1 - P(a human reviewer is required)
-confidence >= confidence-threshold   ->  approve
-anything else                        ->  skip, and comment with the numbers
+Is this pull request ready to be merged as it stands?          approve on yes
+Is the behaviour this pull request changes covered by testing? approve on yes
+Does this pull request require a human reviewer?               approve on no
+
+every question >= confidence-threshold   ->  approve
+any question below it                    ->  skip, and comment with the numbers
 ```
 
 Because Jev's probabilities are calibrated, the threshold is a real dial: `0.95` approves a narrower
-set of changes than `0.8`, and nothing gets approved while the model is torn.
+set of changes than `0.8`, and nothing gets approved while the model is torn about any one question.
+Splitting the decision this way means a skip names *which* question held it back rather than
+producing a single opaque number.
 
 ## Quick start
 
@@ -50,8 +52,8 @@ jobs:
           confidence-threshold: '0.92'
 ```
 
-`instructions` and `criteria` both have defaults, so the snippet above already runs the question at
-the top of this README against the built-in rubric.
+`questions` has a default set, so the snippet above already asks the three questions at the top of
+this README.
 
 More in [`examples/`](examples): [on comment](examples/on-comment.yml), [on every push to a
 PR](examples/on-pull-request.yml), and [through the reusable
@@ -65,8 +67,8 @@ commit pin makes that an upgrade you perform and review, rather than one that ar
 uses: metalbear-co/jev-auto-approve@<commit-sha>
 ```
 
-The examples below use `@v1` for readability. If you override `instructions` and `criteria`
-yourself, the moving part is smaller — but the action still decides how the answer is read.
+The examples below use `@v1` for readability. Supplying your own `questions` shrinks the moving part
+— but the action still decides how the answers are read.
 
 ## In the wild
 
@@ -92,45 +94,49 @@ the part that matters:
           # An app installation token has no user identity, so `approver` is deliberately unset.
           approve-token: ${{ steps.app-token.outputs.token }}
           confidence-threshold: '0.95'
-          criteria: >-
-            ...the repository's own rubric...
+          questions: |
+            ...the repository's own question set...
 ```
 
 Two things it does that are worth copying. The workflow token is `pull-requests: read` only — the
-app token is the single thing that can submit a review. And its `criteria` keep privileged
-automation out of reach: anything under `.github/`, or the release, publishing and signing
+app token is the single thing that can submit a review. And it asks its own question about
+privileged automation, so anything under `.github/`, or the release, publishing and signing
 configuration, needs a human whatever else the change does.
 
-## The question and the rubric
+## The questions
 
-Two inputs shape the decision.
+`questions` is a JSON object of question name to `{instructions, approve_when, yes, no}`:
 
-**`instructions`** is the question itself. Default:
+- **`instructions`** — the question, phrased however reads naturally.
+- **`yes` / `no`** — what each answer *means*. Nothing more: these are definitions, not directions.
+- **`approve_when`** — `"yes"` or `"no"`, whichever answer supports approving. This is the action's
+  own bookkeeping and is not sent to Jev, so a question can read naturally in either direction.
 
-> Does this pull request require a human reviewer before it can be merged?
+The three defaults ask whether the pull request is ready to merge, whether the change is covered by
+testing (tests added or updated, tests that already cover it, or manual testing the pull request
+records), and whether it needs a human reviewer — the last one approving on **no**.
 
-**`criteria`** says what each answer *means*. The default says only that, and deliberately no more:
+Naming `questions` replaces the set rather than adding to it, so include the defaults you still
+want. Ask about whatever your repository actually cares about:
 
+```yaml
+          questions: |
+            {
+              "touches_privileged_automation": {
+                "instructions": "Does this pull request change anything that runs with write-capable credentials?",
+                "approve_when": "no",
+                "yes": "Yes: it changes CI, release, publishing, signing or credential configuration.",
+                "no": "No: it leaves that configuration alone."
+              }
+            }
 ```
-No:  this pull request needs no human intervention. It can be approved as it stands.
-Yes: this pull request should be read by a human before it is merged.
-```
 
-Nothing there decides which one a given pull request is — with the default in place, that judgement
-is Jev's, made against the state it is given. What makes a pull request one or the other in *your*
-repository is what `criteria` is for: replace the no side with free text, or pass a JSON object with
-`true` and `false` string keys to write both. [mirrord's workflow](#in-the-wild) does the latter.
+That last one is worth having somewhere in your set: an auto-approver that can approve changes to
+its own pipeline is not a gate. [mirrord's workflow](#in-the-wild) is a worked example.
 
-Two things worth putting in your own criteria, since the default cannot know them:
-
-- **What "verified" looks like here** — which changes need tests, what counts as a recorded manual
-  test, whether a changelog fragment is expected.
-- **What is never approved by a machine.** Anything running with write-capable credentials — CI and
-  release configuration, publishing, signing, credentials — is worth naming on the `yes` side. An
-  auto-approver that can approve changes to its own pipeline is not a gate.
-
-Missing context lands on *yes* the moment you say so on that side; the state always states when the
-diff was truncated or the discussion could not be read, so there is something to catch it on.
+Every question is gated separately, so adding one can only make approval harder — there is no
+averaging to hide a weak answer behind strong ones. The reported `confidence` is the narrowest
+question: the one that would have to improve for the pull request to be approved.
 
 ## What Jev sees
 
@@ -149,17 +155,14 @@ presenting an empty thread.
 
 ## What it posts
 
-Approving or skipping, the action leaves one comment with the verdict, both probabilities, the
-tokens the call cost, the model, and a link to the workflow run:
+Approving or skipping, the action leaves one comment with a row per question — the confidence, and
+whether it cleared the threshold — plus the tokens the call cost, the model, and a link to the run:
 
-| | |
-| --- | --- |
-| Verdict | `approve` |
-| Confidence no human reviewer is required | `0.980` (threshold `0.92`) |
-| Probability a human reviewer is required | `0.020` |
-| Tokens | `1234` in / `20` out |
-| Model | `jev-1.13.0` |
-| Run | [workflow run](https://github.com) |
+| Question | Asked | Confidence | |
+| --- | --- | --- | --- |
+| `ready_to_merge` | Is this pull request ready to be merged as it stands? (approve on **yes**) | `0.990` | ✅ |
+| `tests_sufficient` | Is the behaviour this pull request changes covered by testing? (approve on **yes**) | `0.500` | ❌ |
+| `needs_human_review` | Does this pull request require a human reviewer? (approve on **no**) | `0.980` | ✅ |
 
 ## Inputs
 
@@ -167,9 +170,8 @@ tokens the call cost, the model, and a link to the workflow run:
 | --- | --- | --- | --- |
 | `jev-api-key` | yes | — | TypeSafe API key for the Jev API. |
 | `approve-token` | yes | — | Token that submits the approval — this is who appears as the reviewer. |
-| `confidence-threshold` | no | `0.9` | Minimum confidence that no human reviewer is required, `0`–`1`. `90` is rejected; use `0.9`. |
-| `instructions` | no | the question above | The question put to Jev. |
-| `criteria` | no | the rubric above | When no human reviewer is required. Free text, or JSON with `true`/`false` keys. |
+| `confidence-threshold` | no | `0.9` | Minimum confidence every question must reach on its approving side, `0`–`1`. `90` is rejected; use `0.9`. |
+| `questions` | no | the three above | JSON object of question name → `{instructions, approve_when, yes, no}`. |
 | `approver` | no | — | Login `approve-token` must belong to. Verified before any review is submitted. |
 | `model` | no | `jev-latest` | Jev model identifier. |
 | `pr-number` | no | from the event | Pull request to review. Needed for `workflow_dispatch`. |
@@ -184,8 +186,8 @@ tokens the call cost, the model, and a link to the workflow run:
 | --- | --- |
 | `approved` | `"true"` when an approving review was submitted. |
 | `verdict` | `approve`, or `human_review_required`. |
-| `confidence` | Confidence that no human reviewer is required, `0`–`1`. |
-| `needs-human-probability` | The probability Jev returned that a human reviewer is required. |
+| `confidence` | Confidence of the narrowest question, `0`–`1`. |
+| `answers` | Per question, as JSON: `confidence`, `yesProbability`, `passed`. |
 | `pr-number` | Pull request that was evaluated. |
 | `reason` | Human-readable explanation of the outcome. |
 

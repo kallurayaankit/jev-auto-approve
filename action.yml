@@ -19,22 +19,17 @@ inputs:
     required: true
   confidence-threshold:
     description: >-
-      Minimum confidence (0-1) that no human reviewer is required, i.e. one minus the probability
-      Jev returns. Below this the run skips.
+      Minimum confidence (0-1) each question has to reach on its approving side. Any question below
+      it means no approval.
     required: false
     default: '0.9'
-  instructions:
+  questions:
     description: >-
-      The question put to Jev. Defaults to "Does this pull request require a human reviewer before
-      it can be merged?" - the action approves when the answer is confidently no.
-    required: false
-    default: ''
-  criteria:
-    description: >-
-      What each answer means. The default says only that "no" is a pull request needing no human
-      intervention and "yes" is one that should be read by a human, leaving the judgement to Jev.
-      Free text replaces the "no" side; a JSON object with "true" and "false" string keys writes
-      both. This is where a repository says what it will and will not have approved by a machine.
+      The questions to ask, as a JSON object of question name -> {instructions, approve_when, yes,
+      no}. Each is asked as its own yes/no question in one call; "yes" and "no" say what those
+      answers mean, and "approve_when" says which of them supports approval. Every question must
+      clear the threshold on its own. Defaults to three: is it ready to merge, is the change
+      covered by testing, and does it need a human reviewer.
     required: false
     default: ''
   approver:
@@ -75,9 +70,9 @@ outputs:
   verdict:
     description: 'approve, or human_review_required.'
   confidence:
-    description: 'Confidence that no human reviewer is required, 0-1.'
-  needs-human-probability:
-    description: 'Probability Jev returned that a human reviewer is required, 0-1.'
+    description: 'Confidence of the narrowest question, 0-1 - the one that would have to improve.'
+  answers:
+    description: 'Per question, as JSON: the confidence, the probability of yes, and whether it passed.'
   pr-number:
     description: 'Pull request that was evaluated.'
   reason:

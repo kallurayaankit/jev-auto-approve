@@ -24,11 +24,15 @@ const PULL_REQUEST = {
   deletions: 1,
 };
 
-// noul is the probability that the answer to "does this need a human reviewer?" is yes.
-function jevAnswer(needsHuman) {
+// One noul per default question; each is the probability that question is answered yes.
+function jevAnswer({ ready = 0.99, tested = 0.98, needsHuman = 0.02 } = {}) {
   return {
     model: 'jev-1.13.0',
-    answers: { needs_human_review: { type: 'noul', noul: needsHuman } },
+    answers: {
+      ready_to_merge: { type: 'noul', noul: ready },
+      tests_sufficient: { type: 'noul', noul: tested },
+      needs_human_review: { type: 'noul', noul: needsHuman },
+    },
     usage: { input_tokens: 1234, output_tokens: 20 },
   };
 }
@@ -117,8 +121,7 @@ async function runAction({ jevResponse, inputs = {}, forbidDiscussion = false })
         'INPUT_APPROVE-TOKEN': 'bot-token',
         'INPUT_GITHUB-TOKEN': 'read-token',
         'INPUT_CONFIDENCE-THRESHOLD': '0.9',
-        INPUT_INSTRUCTIONS: 'Does this pull request require a human reviewer?',
-        INPUT_CRITERIA: 'No human reviewer is required for documentation-only changes.',
+        INPUT_QUESTIONS: '',
         INPUT_APPROVER: 'cubby-mb',
         INPUT_MODEL: 'jev-latest',
         'INPUT_DRY-RUN': 'false',
@@ -137,11 +140,15 @@ async function runAction({ jevResponse, inputs = {}, forbidDiscussion = false })
 }
 
 test('approves the pull request as the approve-token identity', async () => {
-  const { status, seen, outputs, stdout } = await runAction({ jevResponse: jevAnswer(0.02) });
+  const { status, seen, outputs, stdout } = await runAction({ jevResponse: jevAnswer() });
   assert.equal(status, 0);
   assert.equal(outputs.approved, 'true');
   assert.equal(outputs.verdict, 'approve');
-  assert.equal(outputs['needs-human-probability'], '0.02');
+  assert.deepEqual(JSON.parse(outputs.answers).needs_human_review, {
+    confidence: 0.98,
+    yesProbability: 0.02,
+    passed: true,
+  });
   assert.equal(outputs['pr-number'], '5');
 
   const review = seen.find((call) => call.method === 'POST' && call.url.endsWith('/pulls/5/reviews'));
@@ -149,10 +156,11 @@ test('approves the pull request as the approve-token identity', async () => {
   const submitted = JSON.parse(review.body);
   assert.equal(submitted.event, 'APPROVE');
   assert.equal(review.auth, 'Bearer bot-token');
-  // The comment carries the verdict, the confidence, the tokens spent, and a link to the run.
-  assert.match(submitted.body, /\| Verdict \| `approve` \|/);
-  assert.match(submitted.body, /Confidence no human reviewer is required \| `0\.980`/);
-  assert.match(submitted.body, /Tokens \| `1234` in \/ `20` out/);
+  // The comment carries the verdict, a row per question, the tokens spent, and a link to the run.
+  assert.match(submitted.body, /Verdict: `approve`/);
+  assert.match(submitted.body, /\| `ready_to_merge` \|.*`0\.990` \| ✅ \|/);
+  assert.match(submitted.body, /\| `needs_human_review` \|.*approve on \*\*no\*\*.*`0\.980` \| ✅ \|/);
+  assert.match(submitted.body, /`1234` in \/ `20` out/);
   assert.match(submitted.body, /https:\/\/github\.com\/acme\/widgets\/actions\/runs\/42\/attempts\/1/);
 
   // The PR is read with the read token, never the approving one.
@@ -170,27 +178,31 @@ test('approves the pull request as the approve-token identity', async () => {
   // A previous verdict from this action is not fed back in as discussion.
   assert.ok(!jev.state.includes('an earlier verdict'));
 
-  const question = jev.questions.needs_human_review;
-  assert.equal(question.type, 'noul');
-  assert.equal(question.instructions, 'Does this pull request require a human reviewer?');
-  assert.match(question.criteria.false, /documentation-only changes\./);
+  // Every default question is asked in the one call.
+  assert.deepEqual(Object.keys(jev.questions), ['ready_to_merge', 'tests_sufficient', 'needs_human_review']);
+  assert.equal(jev.questions.tests_sufficient.type, 'noul');
+  assert.match(jev.questions.tests_sufficient.instructions, /covered by testing/);
+  assert.ok(jev.questions.needs_human_review.criteria.true.startsWith('Yes:'));
 });
 
 test('comments instead of approving when confidence is below the threshold', async () => {
   const { status, seen, outputs } = await runAction({
-    jevResponse: jevAnswer(0.5),
+    jevResponse: jevAnswer({ tested: 0.5 }),
     inputs: { 'INPUT_CONFIDENCE-THRESHOLD': '0.95' },
   });
   assert.equal(status, 0);
   assert.equal(outputs.approved, 'false');
   assert.equal(outputs.verdict, 'human_review_required');
-  assert.match(outputs.reason, /below the threshold/);
+  assert.match(outputs.reason, /"tests_sufficient" at 0\.500 did not clear the threshold/);
   assert.ok(!seen.some((call) => call.method === 'POST' && call.url.endsWith('/pulls/5/reviews')));
   const comment = seen.find((call) => call.method === 'POST' && call.url.endsWith('/issues/5/comments'));
   assert.ok(comment, 'expected an explanatory comment');
   const body = JSON.parse(comment.body).body;
-  assert.match(body, /\| Verdict \| `human_review_required` \|/);
-  assert.match(body, /Tokens \| `1234` in \/ `20` out/);
+  assert.match(body, /Verdict: `human_review_required`/);
+  // The question that held it back is marked, the ones that passed are not.
+  assert.match(body, /\| `tests_sufficient` \|.*`0\.500` \| ❌ \|/);
+  assert.match(body, /\| `ready_to_merge` \|.*✅ \|/);
+  assert.match(body, /`1234` in \/ `20` out/);
   assert.match(body, /actions\/runs\/42/);
   // Carries the marker so the next run does not read its own verdict back as discussion.
   assert.match(body, /<!-- jev-auto-approve -->/);
@@ -198,7 +210,7 @@ test('comments instead of approving when confidence is below the threshold', asy
 
 test('dry-run submits nothing', async () => {
   const { status, seen, outputs } = await runAction({
-    jevResponse: jevAnswer(0.01),
+    jevResponse: jevAnswer(),
     inputs: { 'INPUT_DRY-RUN': 'true' },
   });
   assert.equal(status, 0);
@@ -208,7 +220,7 @@ test('dry-run submits nothing', async () => {
 
 test('a discussion the token cannot read is reported to Jev as missing', async () => {
   const { status, seen } = await runAction({
-    jevResponse: jevAnswer(0.02),
+    jevResponse: jevAnswer(),
     forbidDiscussion: true,
   });
   assert.equal(status, 0);
@@ -218,7 +230,7 @@ test('a discussion the token cannot read is reported to Jev as missing', async (
 
 test('fails when the approve-token is not the expected approver', async () => {
   const { status, stdout, seen } = await runAction({
-    jevResponse: jevAnswer(0.01),
+    jevResponse: jevAnswer(),
     inputs: { INPUT_APPROVER: 'someone-else' },
   });
   assert.equal(status, 1);
@@ -228,7 +240,7 @@ test('fails when the approve-token is not the expected approver', async () => {
 });
 
 test('a confident yes - a human is needed - does not approve', async () => {
-  const { status, outputs, seen } = await runAction({ jevResponse: jevAnswer(0.99) });
+  const { status, outputs, seen } = await runAction({ jevResponse: jevAnswer({ needsHuman: 0.99 }) });
   assert.equal(status, 0);
   assert.equal(outputs.approved, 'false');
   assert.equal(outputs.verdict, 'human_review_required');

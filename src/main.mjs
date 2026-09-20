@@ -28,8 +28,8 @@ import {
   callJev,
   COMMENT_MARKER,
   decide,
+  parseQuestions,
   parseThreshold,
-  QUESTION_KEY,
   truncateDiff,
 } from './jev.mjs';
 
@@ -45,28 +45,26 @@ function workflowRunUrl() {
 }
 
 function reviewBody({ decision, model, threshold, usage = {} }) {
-  const inputTokens = usage.input_tokens ?? 'unknown';
-  const outputTokens = usage.output_tokens ?? 'unknown';
   const runUrl = workflowRunUrl();
   return [
     COMMENT_MARKER,
     '🤖 **Jev auto-approve**',
     '',
-    '| | |',
-    '| --- | --- |',
-    `| Verdict | \`${decision.verdict}\` |`,
-    `| Confidence no human reviewer is required | \`${decision.confidence.toFixed(3)}\` (threshold \`${threshold}\`) |`,
-    `| Probability a human reviewer is required | \`${decision.needsHumanProbability.toFixed(3)}\` |`,
-    `| Tokens | \`${inputTokens}\` in / \`${outputTokens}\` out |`,
-    `| Model | \`${model}\` |`,
-    runUrl ? `| Run | [workflow run](${runUrl}) |` : null,
+    `Verdict: \`${decision.verdict}\` · threshold \`${threshold}\``,
+    '',
+    '| Question | Asked | Confidence | |',
+    '| --- | --- | --- | --- |',
+    ...decision.questions.map(
+      (question) =>
+        `| \`${question.key}\` | ${question.instructions} (approve on **${question.approveWhen}**) | \`${question.confidence.toFixed(3)}\` | ${question.passed ? '✅' : '❌'} |`,
+    ),
     '',
     decision.reason,
     '',
-    `<sub>Posted by [jev-auto-approve](${ACTION_URL}) — automated verdict, a gate, not a substitute for a human reviewer.</sub>`,
-  ]
-    .filter((line) => line !== null)
-    .join('\n');
+    `<sub>Model: \`${model}\` · \`${usage.input_tokens ?? 'unknown'}\` in / \`${usage.output_tokens ?? 'unknown'}\` out${
+      runUrl ? ` · [workflow run](${runUrl})` : ''
+    } · posted by [jev-auto-approve](${ACTION_URL}) — automated verdict, a gate, not a substitute for a human reviewer.</sub>`,
+  ].join('\n');
 }
 
 /**
@@ -99,8 +97,7 @@ async function run() {
 
   const githubToken = getInput('github-token', { required: true });
   const threshold = parseThreshold(getInput('confidence-threshold', { default: '0.9' }));
-  const instructions = getInput('instructions');
-  const criteria = getInput('criteria');
+  const specs = parseQuestions(getInput('questions'));
   const approver = getInput('approver');
   const model = getInput('model', { default: 'jev-latest' });
   const dryRun = getBooleanInput('dry-run', false);
@@ -145,14 +142,19 @@ async function run() {
     apiKey: jevApiKey,
     model,
     state: buildState({ pullRequest, diff, truncated, discussion }),
-    questions: buildQuestions({ instructions, criteria }),
+    questions: buildQuestions(specs),
   });
   info(`Jev usage: ${JSON.stringify(response.usage ?? {})}`);
 
-  const decision = decide(response.answers?.[QUESTION_KEY], threshold);
+  const decision = decide({ answers: response.answers, specs, threshold });
   setOutput('verdict', decision.verdict);
   setOutput('confidence', String(decision.confidence));
-  setOutput('needs-human-probability', String(decision.needsHumanProbability));
+  setOutput('answers', JSON.stringify(Object.fromEntries(
+    decision.questions.map((question) => [
+      question.key,
+      { confidence: question.confidence, yesProbability: question.yesProbability, passed: question.passed },
+    ]),
+  )));
   setOutput('reason', decision.reason);
 
   const body = reviewBody({ decision, model: response.model ?? model, threshold, usage: response.usage });

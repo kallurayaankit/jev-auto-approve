@@ -5,47 +5,72 @@ import {
   buildQuestions,
   buildState,
   callJev,
-  DEFAULT_CRITERIA,
-  DEFAULT_INSTRUCTIONS,
+  DEFAULT_QUESTIONS,
   decide,
   formatDiscussion,
-  parseCriteria,
+  parseQuestions,
   parseThreshold,
-  QUESTION_KEY,
   truncateDiff,
 } from '../src/jev.mjs';
 import { parseRepository, resolvePullRequestNumber } from '../src/github.mjs';
 
-// A noul answer is the probability that the answer to the question is yes - that a human IS needed.
-const answer = (needsHuman) => ({ type: 'noul', noul: needsHuman });
+const SPECS = {
+  tests_sufficient: { instructions: 'Tested?', approve_when: 'yes', yes: 'Yes: ...', no: 'No: ...' },
+  needs_human_review: { instructions: 'Human?', approve_when: 'no', yes: 'Yes: ...', no: 'No: ...' },
+};
 
-test('approves when Jev is confident no human reviewer is required', () => {
-  const decision = decide(answer(0.02), 0.9);
+// A noul answer is the probability that the question is answered yes.
+const noul = (value) => ({ type: 'noul', noul: value });
+const gate = (tested, needsHuman, threshold = 0.9) =>
+  decide({
+    answers: { tests_sufficient: noul(tested), needs_human_review: noul(needsHuman) },
+    specs: SPECS,
+    threshold,
+  });
+
+test('approves when every question clears the threshold on its approving side', () => {
+  const decision = gate(0.97, 0.02);
   assert.equal(decision.approved, true);
   assert.equal(decision.verdict, 'approve');
-  assert.equal(decision.needsHumanProbability, 0.02);
-  assert.ok(Math.abs(decision.confidence - 0.98) < 1e-9);
+  // The reported confidence is the narrowest question, not an average.
+  assert.ok(Math.abs(decision.confidence - 0.97) < 1e-9);
+  assert.deepEqual(decision.questions.map((q) => q.passed), [true, true]);
 });
 
-test('confidence exactly at the threshold approves', () => {
-  assert.equal(decide(answer(0.1), 0.9).approved, true);
+test('approve_when: no inverts the probability that gates the question', () => {
+  const [, human] = gate(0.97, 0.02).questions;
+  assert.equal(human.yesProbability, 0.02);
+  assert.ok(Math.abs(human.confidence - 0.98) < 1e-9);
 });
 
-test('does not approve when a human reviewer is probably required', () => {
-  const decision = decide(answer(0.11), 0.9);
+test('one failing question is enough to withhold approval', () => {
+  const decision = gate(0.4, 0.01);
   assert.equal(decision.approved, false);
   assert.equal(decision.verdict, 'human_review_required');
-  assert.match(decision.reason, /below the threshold/);
+  assert.match(decision.reason, /"tests_sufficient" at 0\.400/);
+  // The passing question is not what held it back, and is not named.
+  assert.ok(!decision.reason.includes('needs_human_review'));
 });
 
-test('an undecided answer does not approve', () => {
-  assert.equal(decide(answer(0.5), 0.9).approved, false);
+test('confidence exactly at the threshold passes', () => {
+  assert.equal(gate(0.9, 0.1).approved, true);
 });
 
-test('rejects a malformed answer rather than guessing', () => {
-  assert.throws(() => decide({ choice: 'approve' }, 0.9), /Unexpected Jev answer shape/);
-  assert.throws(() => decide({ noul: 1.4 }, 0.9), /Unexpected Jev answer shape/);
-  assert.throws(() => decide(undefined, 0.9), /Unexpected Jev answer shape/);
+test('every failing question is named', () => {
+  const decision = gate(0.4, 0.8);
+  assert.match(decision.reason, /tests_sufficient/);
+  assert.match(decision.reason, /needs_human_review/);
+});
+
+test('a missing or malformed answer for any question is an error, not an approval', () => {
+  assert.throws(
+    () => decide({ answers: { tests_sufficient: noul(0.99) }, specs: SPECS, threshold: 0.9 }),
+    /Unexpected Jev answer for "needs_human_review"/,
+  );
+  assert.throws(
+    () => decide({ answers: { tests_sufficient: noul(1.4), needs_human_review: noul(0) }, specs: SPECS, threshold: 0.9 }),
+    /Unexpected Jev answer for "tests_sufficient"/,
+  );
 });
 
 test('threshold parsing rejects percentages and nonsense', () => {
@@ -54,40 +79,39 @@ test('threshold parsing rejects percentages and nonsense', () => {
   assert.throws(() => parseThreshold('high'), /between 0 and 1/);
 });
 
-test('instructions and criteria are sent as a single noul question', () => {
-  const questions = buildQuestions({
-    instructions: 'Does this pull request need a human?',
-    criteria: 'No human is needed for documentation-only changes.',
-  });
-  const question = questions[QUESTION_KEY];
-  assert.equal(question.type, 'noul');
-  assert.equal(question.instructions, 'Does this pull request need a human?');
-  assert.equal(question.criteria.false, 'No human is needed for documentation-only changes.');
-  // The yes side keeps the built-in wording, including the "answer yes when unsure" instruction.
-  assert.equal(question.criteria.true, DEFAULT_CRITERIA.true);
+test('each question is sent as its own noul with both sides defined', () => {
+  const built = buildQuestions(DEFAULT_QUESTIONS);
+  assert.deepEqual(Object.keys(built), Object.keys(DEFAULT_QUESTIONS));
+  for (const [key, question] of Object.entries(built)) {
+    assert.equal(question.type, 'noul', key);
+    assert.equal(question.instructions, DEFAULT_QUESTIONS[key].instructions);
+    assert.equal(question.criteria.true, DEFAULT_QUESTIONS[key].yes);
+    assert.equal(question.criteria.false, DEFAULT_QUESTIONS[key].no);
+    // approve_when is the action's own bookkeeping and is not part of the API payload.
+    assert.ok(!('approve_when' in question));
+  }
 });
 
-test('empty inputs fall back to the built-in question and rubric', () => {
-  const question = buildQuestions({ instructions: '  ', criteria: '' })[QUESTION_KEY];
-  assert.equal(question.instructions, DEFAULT_INSTRUCTIONS);
-  assert.deepEqual(question.criteria, DEFAULT_CRITERIA);
-  // The question is only the question, and each criteria side says what that answer means -
-  // nothing about what makes a given pull request one or the other.
-  assert.equal(question.instructions, DEFAULT_INSTRUCTIONS);
-  assert.deepEqual(question.criteria, DEFAULT_CRITERIA);
-  assert.ok(question.criteria.false.startsWith('No:'));
-  assert.ok(question.criteria.true.startsWith('Yes:'));
-  assert.match(question.criteria.false, /approved as it stands/);
-  assert.match(question.criteria.true, /read by a human/);
+test('the defaults ask about readiness, testing, and whether a human is needed', () => {
+  assert.deepEqual(Object.keys(DEFAULT_QUESTIONS), ['ready_to_merge', 'tests_sufficient', 'needs_human_review']);
+  assert.equal(DEFAULT_QUESTIONS.needs_human_review.approve_when, 'no');
+  assert.equal(DEFAULT_QUESTIONS.tests_sufficient.approve_when, 'yes');
+  assert.match(DEFAULT_QUESTIONS.tests_sufficient.yes, /manual testing/);
 });
 
-test('criteria can be given as JSON to phrase both sides', () => {
-  assert.deepEqual(parseCriteria('{"true": "needs a human", "false": "does not"}'), {
-    true: 'needs a human',
-    false: 'does not',
-  });
-  assert.throws(() => parseCriteria('{"true": "only one side"}'), /non-empty "true" and "false"/);
-  assert.throws(() => parseCriteria('{nope}'), /could not be parsed/);
+test('questions parse from JSON and are validated', () => {
+  const one = parseQuestions('{"q": {"instructions": "Ready?", "approve_when": "yes", "yes": "Y", "no": "N"}}');
+  assert.deepEqual(one, { q: { instructions: 'Ready?', approve_when: 'yes', yes: 'Y', no: 'N' } });
+  assert.deepEqual(parseQuestions('  '), DEFAULT_QUESTIONS);
+
+  const bad = (json, pattern) => assert.throws(() => parseQuestions(json), pattern);
+  bad('{"q": {"instructions": "Ready?", "yes": "Y", "no": "N"}}', /"approve_when" set to "yes" or "no"/);
+  bad('{"q": {"instructions": "Ready?", "approve_when": "maybe", "yes": "Y", "no": "N"}}', /"yes" or "no"/);
+  bad('{"q": {"instructions": "Ready?", "approve_when": "yes", "yes": "Y"}}', /needs a non-empty "no"/);
+  bad('{"q": {"approve_when": "yes", "yes": "Y", "no": "N"}}', /needs a non-empty "instructions"/);
+  bad('{}', /at least one question/);
+  bad('[]', /keyed by question name/);
+  bad('nope', /could not be parsed/);
 });
 
 test('state carries the title, description, discussion, and diff', () => {
@@ -158,11 +182,11 @@ test('callJev retries a 429 and gives up on a 401', async (t) => {
   globalThis.fetch = async () => {
     calls += 1;
     if (calls < 3) return new Response('rate limited', { status: 429 });
-    return new Response(JSON.stringify({ answers: { [QUESTION_KEY]: answer(0.02) } }), { status: 200 });
+    return new Response(JSON.stringify({ answers: { needs_human_review: noul(0.02) } }), { status: 200 });
   };
   const result = await callJev({ apiKey: 'k', model: 'jev-latest', state: 's', questions: {}, backoffMs: 1 });
   assert.equal(calls, 3);
-  assert.equal(result.answers[QUESTION_KEY].noul, 0.02);
+  assert.equal(result.answers.needs_human_review.noul, 0.02);
 
   calls = 0;
   globalThis.fetch = async () => {

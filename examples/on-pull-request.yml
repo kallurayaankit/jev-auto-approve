@@ -28,6 +28,18 @@ jobs:
           approve-token: ${{ secrets.APPROVE_TOKEN }}
           approver: your-review-bot
           confidence-threshold: '0.95'
-          criteria: >-
-            No human reviewer is required when the pull request is a patch or minor dependency
-            bump that touches nothing beyond the manifest and lockfile, and CI covers the change.
+          questions: |
+            {
+              "routine_bump": {
+                "instructions": "Is this a routine dependency bump?",
+                "approve_when": "yes",
+                "yes": "Yes: a patch or minor version bump touching nothing beyond the manifest and lockfile.",
+                "no": "No: it is a major bump, or it changes something besides the manifest and lockfile."
+              },
+              "needs_human_review": {
+                "instructions": "Does this pull request require a human reviewer before it can be merged?",
+                "approve_when": "no",
+                "yes": "Yes: this pull request should be read by a human before it is merged.",
+                "no": "No: this pull request needs no human intervention. It can be approved as it stands."
+              }
+            }

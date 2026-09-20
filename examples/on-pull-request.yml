@@ -21,6 +21,7 @@ jobs:
       contains(fromJSON('["dependabot[bot]", "renovate[bot]"]'), github.event.pull_request.user.login)
     runs-on: ubuntu-latest
     steps:
+      # Pin to a commit in a real repository: a release can change the default rubric.
       - uses: metalbear-co/jev-auto-approve@v1
         with:
           jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}

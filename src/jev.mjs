@@ -2,17 +2,31 @@ export const JEV_ENDPOINT = process.env.JEV_API_URL || 'https://api.typesafe.ai/
 
 export const QUESTION_KEY = 'needs_human_review';
 
-export const DEFAULT_INSTRUCTIONS =
-  'Does this pull request require a human reviewer before it can be merged?';
+export const DEFAULT_INSTRUCTIONS = [
+  'Does this pull request require a human reviewer before it can be merged?',
+  'Weigh the evidence already on the pull request: a review a human has already left, and whether',
+  'everything they raised was addressed convincingly, counts towards no further human being needed.',
+].join(' ');
 
 export const DEFAULT_CRITERIA = {
   false: [
-    'No human reviewer is required when both of these hold:',
-    '1. The pull request makes no externally visible API change. Nothing that callers depend on is added, removed, renamed, or changed in type or meaning: HTTP endpoints and their payloads, public function or method signatures, exported types, stored schemas, CLI flags, and configuration keys.',
-    '2. The change is verified. Either sufficient tests were added or updated to cover the behaviour that changed, or the pull request records manual testing that actually exercises it.',
+    'No human reviewer is required when the change is verified and its reach is small enough that a',
+    'mistake would be caught before it hurt anyone. Weigh these together:',
+    '1. Verification. Tests were added or updated to cover the behaviour that changed, or the pull',
+    'request records manual testing that actually exercises it.',
+    '2. Review already done. A human reviewed this pull request and everything they raised was',
+    'addressed, in the code or in an answer that holds up.',
+    '3. Reach. How much depends on this change. An externally visible change - HTTP endpoints and',
+    'their payloads, public function or method signatures, exported types, stored schemas, CLI flags,',
+    'configuration keys - weighs towards needing a human, and weighs more the more callers it can',
+    'break. It does not on its own require one: a small, deliberate, tested change to an external',
+    'interface that the pull request explains can still be fine.',
   ].join('\n'),
   true: [
-    'A human reviewer is required when either condition fails: the pull request changes an externally visible API, or behaviour changed without tests covering it and without a record of manual testing that does.',
+    'A human reviewer is required when the change is unverified - behaviour changed with neither',
+    'tests nor a record of manual testing - when something raised in review is unaddressed or',
+    'brushed aside, or when the change reaches far enough that getting it wrong breaks callers who',
+    'had no say in it.',
     'Answer yes when the diff does not give you enough to tell.',
   ].join('\n'),
 };

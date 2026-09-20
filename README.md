@@ -57,6 +57,17 @@ More in [`examples/`](examples): [on comment](examples/on-comment.yml), [on ever
 PR](examples/on-pull-request.yml), and [through the reusable
 workflow](examples/reusable-workflow.yml).
 
+**Pin to a commit, not to `@v1`.** The default question and rubric live in this action, so a release
+can change what gets approved in your repository without anything in your repository changing. A
+commit pin makes that an upgrade you perform and review, rather than one that arrives on its own:
+
+```yaml
+uses: metalbear-co/jev-auto-approve@<commit-sha>
+```
+
+The examples below use `@v1` for readability. If you override `instructions` and `criteria`
+yourself, the moving part is smaller — but the action still decides how the answer is read.
+
 ## The question and the rubric
 
 Two inputs shape the decision.
@@ -66,10 +77,16 @@ Two inputs shape the decision.
 > Does this pull request require a human reviewer before it can be merged?
 
 **`criteria`** describes when *no* human reviewer is required — the side of the answer that gates
-the approval. Default, in short: **no externally visible API change** (nothing that callers depend
-on is added, removed, renamed, or re-typed — endpoints, exported signatures, stored schemas, CLI
-flags, config keys), **and the change is verified** (tests added or updated for the behaviour that
-changed, or the pull request records manual testing that exercises it).
+the approval. The default weighs three things together rather than applying a checklist:
+
+- **Verification** — tests added or updated for the behaviour that changed, or a record of manual
+  testing that exercises it.
+- **Review already done** — a human reviewed the pull request and everything they raised was
+  addressed, in the code or in an answer that holds up.
+- **Reach** — how much depends on the change. An externally visible change (endpoints, exported
+  signatures, stored schemas, CLI flags, config keys) *weighs towards* needing a human, more so the
+  more callers it can break. It is not a veto: a small, deliberate, tested change to an external
+  interface that the pull request explains can still pass.
 
 The built-in wording for the other side ends with *"answer yes when the diff does not give you
 enough to tell"*, so missing context pushes toward a human rather than toward an approval. Set

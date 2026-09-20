@@ -71,8 +71,14 @@ test('empty inputs fall back to the built-in question and rubric', () => {
   const question = buildQuestions({ instructions: '  ', criteria: '' })[QUESTION_KEY];
   assert.equal(question.instructions, DEFAULT_INSTRUCTIONS);
   assert.deepEqual(question.criteria, DEFAULT_CRITERIA);
-  assert.match(question.criteria.false, /externally visible API change/);
-  assert.match(question.criteria.false, /tests were added or updated|manual testing/);
+  assert.match(question.instructions, /require a human reviewer/);
+  // An existing review that was addressed counts towards no further human being needed.
+  assert.match(question.instructions, /already left/);
+  assert.match(question.criteria.false, /Tests were added or updated|manual testing/);
+  assert.match(question.criteria.false, /A human reviewed this pull request/);
+  // An external change weighs on the answer rather than settling it.
+  assert.match(question.criteria.false, /weighs towards needing a human/);
+  assert.match(question.criteria.false, /does not on its own require one/);
 });
 
 test('criteria can be given as JSON to phrase both sides', () => {

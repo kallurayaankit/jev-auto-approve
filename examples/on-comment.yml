@@ -33,6 +33,7 @@ jobs:
               content: 'eyes',
             });
 
+      # Pin to a commit in a real repository: a release can change the default rubric.
       - id: jev
         uses: metalbear-co/jev-auto-approve@v1
         with:

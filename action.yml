@@ -1,0 +1,88 @@
+name: 'Jev auto-approve'
+description: 'Approve a pull request when the Jev API returns a verdict of approve above a confidence threshold.'
+author: 'MetalBear'
+
+branding:
+  icon: 'check-circle'
+  color: 'purple'
+
+inputs:
+  jev-api-key:
+    description: 'TypeSafe API key used to call the Jev API. Pass a secret, never a literal.'
+    required: true
+  approve-token:
+    description: >-
+      Token that submits the approval. Use the PAT of the bot account that should appear as the
+      reviewer (e.g. cubby-mb), or an installation token minted for a GitHub App. The default
+      GITHUB_TOKEN can approve, but the review is attributed to github-actions[bot] and does not
+      satisfy "required approvals" on protected branches.
+    required: true
+  confidence-threshold:
+    description: >-
+      Minimum confidence (0-1) that no human reviewer is required, i.e. one minus the probability
+      Jev returns. Below this the run skips.
+    required: false
+    default: '0.9'
+  instructions:
+    description: >-
+      The question put to Jev. Defaults to "Does this pull request require a human reviewer before
+      it can be merged?" - the action approves when the answer is confidently no.
+    required: false
+    default: ''
+  criteria:
+    description: >-
+      Free text describing when NO human reviewer is required; this is the rubric the approval
+      turns on. Defaults to: no externally visible API change, and the change is verified by tests
+      or a record of manual testing. Pass a JSON object with "true" and "false" string keys to
+      phrase both sides yourself.
+    required: false
+    default: ''
+  approver:
+    description: >-
+      Login expected to own approve-token (e.g. cubby-mb). When set, the identity behind the token
+      is verified before any review is submitted and the run fails on a mismatch. Leave empty to
+      skip the check (required for GitHub App installation tokens, which have no user identity).
+    required: false
+    default: ''
+  model:
+    description: 'Jev model identifier.'
+    required: false
+    default: 'jev-latest'
+  pr-number:
+    description: 'Pull request to review. Defaults to the PR carried by the triggering event.'
+    required: false
+    default: ''
+  github-token:
+    description: 'Token used to read the pull request and its diff.'
+    required: false
+    default: ${{ github.token }}
+  dry-run:
+    description: 'Evaluate and report the verdict without submitting a review.'
+    required: false
+    default: 'false'
+  comment-on-skip:
+    description: 'Post a comment explaining why the PR was not approved.'
+    required: false
+    default: 'true'
+  max-diff-bytes:
+    description: 'Diff is truncated to this many bytes before being sent to Jev.'
+    required: false
+    default: '200000'
+
+outputs:
+  approved:
+    description: '"true" when an approving review was submitted.'
+  verdict:
+    description: 'approve, or human_review_required.'
+  confidence:
+    description: 'Confidence that no human reviewer is required, 0-1.'
+  needs-human-probability:
+    description: 'Probability Jev returned that a human reviewer is required, 0-1.'
+  pr-number:
+    description: 'Pull request that was evaluated.'
+  reason:
+    description: 'Human-readable explanation of the outcome.'
+
+runs:
+  using: 'node20'
+  main: 'src/main.mjs'

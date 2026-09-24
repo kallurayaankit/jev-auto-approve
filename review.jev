@@ -1,0 +1,26 @@
+# review.jev
+from jevlang import ask_all
+
+def score_pr(diff_text, title, description):
+    answers = ask_all(
+        state=f"Title: {title}\n\nDescription: {description}\n\nDiff:\n{diff_text}",
+        security_risk=["none", "low", "medium", "high", "critical"],
+        test_coverage=["none", "partial", "adequate", "thorough"],
+        style_consistency=["poor", "inconsistent", "mostly_consistent", "consistent"],
+        needs_human="Does this change require a human reviewer before merge?",
+    )
+    return answers
+
+def suggested_action(answers):
+    sec = float(answers.security_risk)
+    tests = float(answers.test_coverage)
+    style = float(answers.style_consistency)
+    human = float(answers.needs_human)
+
+    if sec >= 3.5:
+        return "request_changes", f"High security risk ({sec:.1f}/4)"
+    if human >= 0.6:
+        return "human_review", f"Human review required (p={human:.2f})"
+    if tests < 2.0:
+        return "request_changes", f"Insufficient test coverage ({tests:.1f}/3)"
+    return "approve", f"Security {sec:.1f}, tests {tests:.1f}, style {style:.1f}"

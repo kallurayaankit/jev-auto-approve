@@ -1,9 +1,8 @@
-steps:
-  - - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-    with:
-      fetch-depth: 0
-  - uses: metalbear-co/jev-auto-approve@<COMMIT_SHA_FOR_V1> # v1
-    with:
-      jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
-      confidence-threshold: '0.85'
-      approve-token: ''
+- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+  with:
+    fetch-depth: 0
+- uses: metalbear-co/jev-auto-approve@5c58e7b3a3c9977a7e646504190457773d1d87fa # v2.0.0
+  with:
+    jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
+    confidence-threshold: '0.85'
+    approve-token: ''

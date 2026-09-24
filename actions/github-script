@@ -1,0 +1,31 @@
+      - name: Run Jev review
+        id: review
+        run: |
+          uv run python review_runner.py > review.json
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const r = JSON.parse(fs.readFileSync('review.json', 'utf8'));
+            const emoji = {approve: '✅', request_changes: '🛑', human_review: '👤'}[r.action];
+            const body = `## ${emoji} Jev Review\n\n` +
+              `**Action:** \`${r.action}\`\n\n` +
+              `| Dimension | Score |\n|---|---|\n` +
+              `| Security risk | ${r.security.toFixed(2)} |\n` +
+              `| Test coverage | ${r.tests.toFixed(2)} |\n` +
+              `| Style consistency | ${r.style.toFixed(2)} |\n` +
+              `| Needs human | ${r.human.toFixed(2)} |\n\n` +
+              `_${r.reason}_`;
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+            if (r.action === 'request_changes') {
+              core.setFailed('Jev requested changes');
+            }

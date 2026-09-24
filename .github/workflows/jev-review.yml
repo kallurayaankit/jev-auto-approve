@@ -1,0 +1,23 @@
+name: Jev PR Quality Gate
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need the full diff
+
+      - uses: metalbear-co/jev-auto-approve@v1
+        with:
+          jev-api-key: ${{ secrets.TYPESAFE_API_KEY }}
+          confidence-threshold: '0.85'
+          # don't auto-approve — just run the judgment
+          approve-token: ''
